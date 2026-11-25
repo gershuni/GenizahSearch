@@ -10,7 +10,9 @@ seconds, and waits for its input. It still serves exactly one computation.
 
 A text search can ask for early rows (execute_search's preview_callback): the
 child writes them to preview.pkl and IsolatedEngine hands them on while the
-search is still running.
+search is still running. With the scholarly editions the two legs run in two
+children: the editions' hands its rows to the main leg's (a file both are given),
+which hands over the grouped rows that are certain (shared/editions_preview.py).
 """
 from __future__ import annotations
 
@@ -22,7 +24,6 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import inspect
-import gzip
 import json
 import logging
 import os
@@ -35,8 +36,9 @@ import threading
 import time
 
 import psutil
+from shared.gc_pause import gc_paused
 from shared.research_limits import available_memory
-from shared.research_worker import PREVIEW_MAX_BYTES
+from shared.research_worker import PREVIEW_MAX_BYTES, open_output, read_editions_result
 
 log = logging.getLogger(__name__)
 _cancel_context = ContextVar('research_cancel', default=None)
@@ -318,6 +320,7 @@ class ResearchQueue:
                        GENIZAH_RESEARCH_PARENT=str(os.getpid()),
                        GENIZAH_RESEARCH_SLOT=str(slot + self.slot_offset),
                        GENIZAH_RESEARCH_MEMORY_MB=str(allocation_mb),
+                       GENIZAH_RESEARCH_RESULT_MB=str(self.result_mb),
                        GENIZAH_RESEARCH_WARM='0' if payload is not None else '1')
             # Logs stay in the server log, never in a response containing paths
             # or corpus text. No shell, no web module entry point, no stdout pipe
@@ -441,9 +444,9 @@ class ResearchQueue:
                 if job.cancel.wait(0.2):
                     raise InterruptedError('Search cancelled')
             # Only our own subprocess writes this private temporary file.
-            with (gzip.open(output, 'rb') if size_file.exists() else output.open('rb')) as stream:
+            with open_output(output) as stream, gc_paused():
                 result = pickle.load(stream)
-            log.info('Research result transferred: %d compressed bytes, %d expanded bytes', output_bytes, expanded_bytes)
+            log.info('Research result transferred: %d bytes saved, %d bytes loaded', output_bytes, expanded_bytes)
             if result.get('error'):
                 raise_worker_error(result)
             return result
@@ -765,29 +768,50 @@ class IsolatedEngine:
                        'options': self._options, 'settings': self.job_settings(),
                        'time_limit': time_limit}
             parallel = _reads_editions_in_parallel(name, arguments)
-            if preview is not None and not parallel:
-                # With editions there are no early rows: the grouped order is known only
-                # at the end (editions plan §5).
+            if preview is not None:
                 payload['preview'] = True
             _editions_skipped.value = False
-            if parallel:
-                # The two legs of a search with editions, each in a worker of its own, at
-                # once (editions plan §3.10): the main index in the main queue, the editions
-                # index in its own. Both share the time limit and a Stop.
-                waiting = [_Waiting(queue, queue.submit(
-                    {**payload, 'method': 'execute_search_leg', 'arguments': _leg_arguments(arguments, 'main')}))]
-                editions_queue = get_editions_queue()
-                try:
-                    waiting.append(_Waiting(editions_queue, editions_queue.submit(
-                        {**payload, 'method': 'execute_search_leg',
-                         'arguments': _leg_arguments(arguments, 'editions')}), required=False))
-                except ResearchJobError as exc:
-                    log.warning('Editions leg not started: %s', exc)
-                    _editions_skipped.value = True
-            else:
-                waiting = [_Waiting(queue, queue.submit(payload))]
-            self._wait_for(waiting, time_limit=time_limit, shared=shared, progress=progress,
-                           preview=None if parallel else preview)
+            shown = []          # the early rows handed on last, by uid
+            handoff = None
+            if parallel and preview is not None:
+                # Where the editions leg's worker leaves its rows for the main leg's, which
+                # shows the first grouped rows while it runs (editions plan §3.3 item 7).
+                handoff = tempfile.TemporaryDirectory(prefix='genizah-editions-', ignore_cleanup_errors=True)
+                payload['editions_file'] = str(Path(handoff.name) / 'editions.pkl')
+
+                def preview(rows, hand_on=preview):
+                    shown[:] = [r.get('uid') for r in rows]
+                    hand_on(rows)
+            try:
+                if parallel:
+                    # The two legs of a search with editions, each in a worker of its own, at
+                    # once (editions plan §3.10): the main index in the main queue, the editions
+                    # index in its own. Both share the time limit and a Stop.
+                    waiting = [_Waiting(queue, queue.submit(
+                        {**payload, 'method': 'execute_search_leg', 'arguments': _leg_arguments(arguments, 'main')}))]
+                    editions_queue = get_editions_queue()
+                    try:
+                        waiting.append(_Waiting(editions_queue, editions_queue.submit(
+                            {**payload, 'method': 'execute_search_leg',
+                             'arguments': _leg_arguments(arguments, 'editions')}), required=False))
+                    except ResearchJobError as exc:
+                        log.warning('Editions leg not started: %s', exc)
+                        _editions_skipped.value = True
+                else:
+                    waiting = [_Waiting(queue, queue.submit(payload))]
+                self._wait_for(waiting, time_limit=time_limit, shared=shared, progress=progress, preview=preview)
+                for w in waiting:
+                    if shown and w.error is not None:
+                        # Early rows were shown from the rows this leg found; it failed only in
+                        # handing them to this process. They are kept, so the list is the one
+                        # those rows begin.
+                        w.result = read_editions_result(payload['editions_file'])
+                        if w.result is not None:
+                            log.warning('Editions leg kept from its early rows: %r', w.error)
+                            w.error = None
+            finally:
+                if handoff is not None:
+                    handoff.cleanup()
             from shared.search_engine import (_note_search_cutoff, _set_last_responsa_downgrade,
                                               _set_last_responsa_downgrade_meta)
             results = [w.result for w in waiting if w.result is not None]
@@ -814,6 +838,10 @@ class IsolatedEngine:
                 legs = [w.result['value'] if w.result is not None else None for w in waiting]
                 value, _ = SearchEngine.merge_search_legs(
                     legs[0], legs[1] if len(legs) > 1 else None, ids_only=bool(arguments.get('ids_only')))
+                if shown and len(legs) > 1 and legs[1] is not None and not any(
+                        (r.get('cutoff') or {}).get('interrupted') for r in results):
+                    from shared.editions_preview import check_preview
+                    check_preview(shown, value)
                 downgrade = _joined_warnings(*(r.get('downgrade') for r in results))
                 cascade = next((r['cascade'] for r in results if r.get('cascade')), None)
             else:

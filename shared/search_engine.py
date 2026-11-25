@@ -21,7 +21,7 @@ import html
 import json
 import pickle
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque, namedtuple
 from dataclasses import dataclass
 from typing import Optional
 
@@ -59,6 +59,7 @@ from shared.responsa_match import (
 )
 from shared.search_mode_signs import MODE_SIGNS
 from shared import background_work
+from shared.gc_pause import gc_paused
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -194,8 +195,9 @@ def _group_legs(main_rows, edition_rows, main_leg, editions_leg, ids_only):
 
         def count(row):
             return _all_star_count(row, regex, strip)
-    rows = group_results(main_rows, edition_rows, main_leg.get('local') or [], ids_only=ids_only,
-                         match_count=count, k=RRF_K)
+    with gc_paused():
+        rows = group_results(main_rows, edition_rows, main_leg.get('local') or [], ids_only=ids_only,
+                             match_count=count, k=RRF_K)
     if count is not None:
         rows = SearchEngine._order_all_star(rows, leg.get('regex'), leg.get('strip'))
     warning = _joined_warnings(main_leg.get('warning'), editions_leg.get('warning'))
@@ -298,6 +300,10 @@ _PROGRESS_TICK_SECONDS = 0.5
 # variants/fuzzy search may find only a few rows over a long run).
 _PREVIEW_ROWS = 50
 _PREVIEW_AFTER_S = 0.5
+# A grouped preview (a search with editions) is worked out when the main leg has settled this
+# many rows, then each time it has twice as many, and in between every _PREVIEW_AFTER_S.
+_FEED_FIRST = 25
+_EarlyHit = namedtuple('_EarlyHit', 'key at most score addr seam')
 
 # Why a Responsa search did not read every match across a page break (plan §7, "Phase 3,
 # settled before building", points 7-8). Each one marks the search incomplete ("N+")
@@ -2826,6 +2832,16 @@ class SearchEngine:
                    for scope in ('part', 'system')])
         return query
 
+    def _linked_pages_query(self, pages, sys_ids):
+        """The page docs on *pages* (uids) or in the manuscripts *sys_ids* -- and others: a page's
+        uid is looked up by its last part, which another may share."""
+        should = tantivy.Occur.Should
+        ends = sorted({parts[-1].lower() for parts in (re.findall(r'[^\W_]+', p) for p in pages) if parts})
+        clauses = [(should, tantivy.Query.term_set_query(self.index.schema, 'unique_id', ends))]
+        if sys_ids:
+            clauses.append((should, self._restriction_query(sys_ids, pages_only=True)))
+        return tantivy.Query.boolean_query(clauses)
+
     def _reversed_words_field(self, index):
         """The reversed-words field of *index* (the main index or the seam index), where a
         Responsa word that begins with a star and ends with a letter is looked up (plan §7,
@@ -4374,7 +4390,10 @@ class SearchEngine:
         with ``members`` (each with its ``edition`` record), ordered with My Library's rows
         by reciprocal rank fusion. The editions leg runs only for the text modes in the
         Genizah / all scope; whenever it does not run (no editions index, Title/Shelfmark,
-        My Library only), the search is today's. Previews are off when editions are read.
+        My Library only), the search is today's. *preview_callback* with ``'all'``: the first
+        grouped rows, as far as they are certain while the main leg runs
+        (shared/editions_preview.py) -- the editions leg then runs first. With ``'editions'``
+        there are no previews.
         """
         if mode == 'Catalog':
             if corpus_scope == 'local':
@@ -4418,6 +4437,9 @@ class SearchEngine:
         if max_rows is not None and max_rows >= 1 and not ids_only:
             return self._first_grouped_rows(query_str, mode, gap, editions, sources == SOURCES_ALL,
                                             max_rows, args, edition_args)
+        if (sources == SOURCES_ALL and preview_callback is not None and corpus_scope == 'genizah'
+                and not exclude_words and not ids_only):
+            return self._previewed_grouped_rows(query_str, mode, gap, editions, preview_callback, args, edition_args)
         if sources == SOURCES_ALL:
             main_rows = self._execute_search_leg(query_str, mode, gap, _leg=main_leg, **args)
         if not _search_interrupted():
@@ -4425,6 +4447,29 @@ class SearchEngine:
                 phase_callback(PHASE_EDITIONS_SEARCH)
             edition_rows = editions._execute_search_leg(query_str, mode, gap, _leg=editions_leg, **edition_args)
         return self._grouped_rows(main_rows, edition_rows, main_leg, editions_leg, ids_only)
+
+    def _previewed_grouped_rows(self, query_str, mode, gap, editions, preview_callback, args, edition_args):
+        """A search with editions whose first grouped rows are shown while it runs (the desktop):
+        the editions leg first (it is small), then the main leg, which hands over the start of
+        the grouped list as it becomes certain (shared/editions_preview.py). The list is the one
+        the legs give in the other order."""
+        from shared.editions_preview import PreviewFeed, check_preview
+        main_leg, editions_leg = {}, {}
+        if args.get('phase_callback') is not None:
+            args['phase_callback'](PHASE_EDITIONS_SEARCH)
+        edition_rows = editions._execute_search_leg(query_str, mode, gap, _leg=editions_leg, **edition_args)
+        main_rows, shown = [], []
+
+        def preview(rows):
+            shown[:] = [r['uid'] for r in rows]
+            preview_callback(rows)
+        if not _search_interrupted():
+            main_rows = self._execute_search_leg(query_str, mode, gap, _leg=main_leg,
+                                                 _feed=PreviewFeed(preview, edition_rows), **args)
+        rows = self._grouped_rows(main_rows, edition_rows, main_leg, editions_leg, False)
+        if not _search_interrupted():
+            check_preview(shown, rows)
+        return rows
 
     def _first_grouped_rows(self, query_str, mode, gap, editions, with_main, max_rows, args, edition_args):
         """A search with editions that shows its first *max_rows* results (execute_search's
@@ -4488,7 +4533,8 @@ class SearchEngine:
     @bounded_search
     def execute_search_leg(self, query_str, mode, gap, leg, progress_callback=None, exclude_words=None,
                            responsa_options=None, restrict_sys_ids: set = None, text_position: str = None,
-                           corpus_scope: str = "all", phase_callback=None, ids_only=False):
+                           corpus_scope: str = "all", phase_callback=None, ids_only=False,
+                           preview_callback=None, edition_rows=None):
         """One leg of a search with editions, for a research worker of its own beside the other
         leg's (the website: editions plan §3.10, the owner's parallel worker). *leg*: ``'main'``
         (the main index and My Library, as ``execute_search(sources='all')`` runs it first) or
@@ -4499,7 +4545,11 @@ class SearchEngine:
         its ``_matches`` counted here, where the text is, and the leg's facts without its compiled
         pattern. ``merge_search_legs`` joins the two as ``execute_search(sources='all')`` would
         have; the legs are the coordinator's own (_execute_search_leg), so the two routes return
-        the same rows. An editions leg with no editions index open raises ValueError."""
+        the same rows. An editions leg with no editions index open raises ValueError.
+
+        *preview_callback* / *edition_rows* (the main leg): the first grouped rows are handed over
+        while it runs (shared/editions_preview.py), once *edition_rows* -- a callable, the other
+        worker's -- gives the editions leg's rows."""
         if leg not in ('main', 'editions'):
             raise ValueError(f"Unknown search leg: {leg!r}")
         if mode in ('Title', 'Shelfmark') or corpus_scope == 'local':
@@ -4519,6 +4569,9 @@ class SearchEngine:
             raise ValueError("The main leg reads the main index.")
         self._clear_search_state()
         _validate_word_gap(mode, gap, responsa_options)
+        if leg == 'main' and preview_callback is not None and edition_rows is not None:
+            from shared.editions_preview import PreviewFeed
+            args['_feed'] = PreviewFeed(preview_callback, edition_rows)
         facts = {}
         rows = engine._execute_search_leg(query_str, mode, gap, _leg=facts, **args)
         regex = facts.pop('regex', None)
@@ -4540,7 +4593,7 @@ class SearchEngine:
         editions = editions or {'rows': [], 'leg': {}}
         return _group_legs(main['rows'], editions['rows'], main['leg'], editions['leg'], ids_only)
 
-    def _execute_search_leg(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False, metadata_sys_ids=None, near_spellings=False, _leg=None, max_rows=None, _full_rows=None, _full_pages=None, _full_sys_ids=None):
+    def _execute_search_leg(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False, metadata_sys_ids=None, near_spellings=False, _leg=None, max_rows=None, _full_rows=None, _full_pages=None, _full_sys_ids=None, _feed=None):
         """One index's search (execute_search's docstring, below); today's whole search
         when *_leg* is None. *_leg* (a dict): one leg of a search with editions -- the state
         is not cleared (the coordinator did), no previews, My Library's rows go to
@@ -4587,6 +4640,11 @@ class SearchEngine:
         to be grouped and counted by the coordinator (execute_search). *_full_pages* /
         *_full_sys_ids*: pages, and manuscripts, whose rows are always built: those the
         grouping can lead with whatever their rank here (``_editions_counterparts``).
+
+        *_feed* (the main leg of a search with editions): a ``PreviewFeed``
+        (shared/editions_preview.py), given this leg's rows as they are found; the pages it asks
+        for are checked out of turn, their rows kept for where they belong. Used where
+        *preview_callback* would be without editions.
 
         *ids_only* (D8, 2026-10-04): the COMPLETE set of matches, as light rows
         ({'uid', 'display': {'id', 'source'}, 'scope'}) -- every candidate read, no
@@ -5017,26 +5075,24 @@ class SearchEngine:
         # (score, address, page uid); see the loop below.
         _put_aside = []
 
-        def _page_hits_then_aggregates():
-            """(score, address, from a seam, page uid of a hit put aside) of the page hits,
-            then the V0.7 pages max_rows put aside, then -- fetched only now -- the
-            whole-manuscript / part hits or the seams, with a limit of their own:
-            they are the only source of a phrase's page-break matches, so page hits that
-            fill the limit must not leave them no room (Codex review of PR #375). A step
-            that fails, or that a star query may not read in time, leaves the search
-            marked "N+" -- never silently (plan §5.4)."""
-            nonlocal total_hits, tantivy_elapsed_ms
-            for score, addr in hits:
-                yield score, addr, False, None
-            # Each V0.7 page row still comes after every page row before it and before
-            # any whole-manuscript row: the V0.7 rows keep their order among themselves.
-            for score, addr, uid in _put_aside:
-                yield score, addr, False, uid
+        _crossing_found = None   # _crossing_hits' answer, once asked
+        _hit_at = (0, 0)         # where the hit being read stands: (0: a page, 1: a crossing; its place)
+        # The hits a grouped preview needs read out of turn (_EarlyHit, *_feed*), and the rows
+        # they gave, by key, until their turn.
+        _early_queue = deque()
+        _early_rows = {}
+
+        def _crossing_hits():
+            """The hits that hold matches across pages, read once: the whole-manuscript / part
+            documents, or the seams, with a limit of their own. A step that fails, or that a
+            star query may not read in time, leaves the search marked "N+" -- never silently
+            (plan §5.4)."""
+            nonlocal total_hits, tantivy_elapsed_ms, _crossing_found
+            if _crossing_found is not None:
+                return _crossing_found
+            _crossing_found = []
             if agg_q is None and not _from_seams:
-                return
-            if progress_callback:
-                # A checkpoint before the second query, which cannot be stopped.
-                progress_callback(len(hits), total_hits)
+                return _crossing_found
             started = time.perf_counter()
             try:
                 if _from_seams:
@@ -5051,20 +5107,50 @@ class SearchEngine:
                             crossing_notes.append(_tr(CROSSING_NOTE_TOO_MANY).format(
                                 n=found, limit=Config.RESPONSA_STAR_AGGREGATE_LIMIT))
                             _note_search_cutoff(partial=True)
-                            return
+                            return _crossing_found
                 more, more_capped = _top_hits(searcher, query, _limit)
                 _note_search_cutoff(capped=more_capped)
             except (MemoryError, ResponsaQueryRefused):
+                _crossing_found = None      # not answered: asked again, it says so again
                 raise
             except Exception as e:
                 LOGGER.warning("Crossing query failed; page results kept, marked N+: %s", e)
                 _note_search_cutoff(capped=True)
                 crossing_notes.append(_tr(CROSSING_NOTE_FAILED))
-                return
+                return _crossing_found
             tantivy_elapsed_ms += (time.perf_counter() - started) * 1000.0
             total_hits += len(more)
-            for score, addr in more:
-                yield score, addr, _from_seams, None
+            _crossing_found = more
+            return _crossing_found
+
+        def _page_hits_then_aggregates():
+            """(score, address, from a seam, page uid of a hit put aside, a hit read out of turn)
+            of the page hits, then the V0.7 pages max_rows put aside, then -- fetched only now,
+            unless a grouped preview asked -- the whole-manuscript / part hits or the seams (_crossing_hits):
+            they are the only source of a phrase's page-break matches, so page hits that
+            fill the limit must not leave them no room (Codex review of PR #375)."""
+            nonlocal _hit_at
+            for place, (score, addr) in enumerate(hits):
+                while _early_queue:
+                    early = _early_queue.popleft()
+                    yield early.score, early.addr, early.seam, None, early
+                _hit_at = (0, place)
+                yield score, addr, False, None, None
+            # Each V0.7 page row still comes after every page row before it and before
+            # any whole-manuscript row: the V0.7 rows keep their order among themselves.
+            for score, addr, uid in _put_aside:
+                yield score, addr, False, uid, None
+            if agg_q is None and not _from_seams:
+                return
+            if progress_callback and _crossing_found is None:
+                # A checkpoint before the second query, which cannot be stopped.
+                progress_callback(len(hits), total_hits)
+            for place, (score, addr) in enumerate(_crossing_hits()):
+                while _early_queue:
+                    early = _early_queue.popleft()
+                    yield early.score, early.addr, early.seam, None, early
+                _hit_at = (1, place)
+                yield score, addr, _from_seams, None, None
         results = []
         regex_filtered_count = 0
         was_interrupted = False
@@ -5201,14 +5287,123 @@ class SearchEngine:
                 kept += 1
             return kept
 
+        # The grouped preview of a search with editions: offered where an early row of this
+        # leg alone would be (_preview, above), on an index whose pages are found by themselves.
+        if _feed is not None and (ids_only or _leg is None or corpus_scope != 'genizah' or exclude_words
+                                  or not _found_order_kept or self._edition_leaf
+                                  or not (_page_only or self._every_doc_has_scope())):
+            _feed = None
+        _fed, _fed_at = 0, (0, 0)    # rows of `results` the feed has seen; where the next ones' hit stands
+        _reading = None              # the hit out of turn being read, if it is one
+        _feed_due, _feed_last = _FEED_FIRST, search_started
+        _feed_asked = None           # what was read for the feed's last question: (order, most, row)
+        _places = None
+
+        def _linked_hits(pages, sids, page_sids):
+            """The hits not read yet that can give a row on *pages* or in the manuscripts *sids*
+            (GroupedPrefix.wanted), in their order. The documents there are looked up and picked
+            out of the hits: asking the search's own query again, for these documents alone,
+            costs what it did the first time (seconds for a regex, or within a long list of
+            manuscripts)."""
+            nonlocal _places
+            if progress_callback and _crossing_found is None and (agg_q is not None or _from_seams):
+                # The checkpoint before the second query, as _page_hits_then_aggregates has it.
+                progress_callback(min(_hit_at[1], total_hits), total_hits)
+            more = _crossing_hits()
+            if _places is None:
+                _places = {(False, a.segment_ord, a.doc): ((0, n), s) for n, (s, a) in enumerate(hits)}
+                _places.update({(_from_seams, a.segment_ord, a.doc): ((1, n), s) for n, (s, a) in enumerate(more)})
+            lookups = [(self.searcher, self._linked_pages_query(pages, sids), False)]
+            if more and _from_seams:
+                lookups.append((self.seam_searcher, self._seam_restriction(sids | page_sids), True))
+            elif more:
+                lookups.append((self.searcher, self._restriction_query(sids | page_sids), False))
+            found = []
+            for searcher, linked, seam in lookups:
+                there = searcher.search(linked, Config.SEARCH_LIMIT).hits
+                if len(there) >= Config.SEARCH_LIMIT:
+                    raise RuntimeError('too many linked pages to read ahead')
+                for _score, addr in there:
+                    key = (seam, addr.segment_ord, addr.doc)
+                    # Past the candidate limit, it is not in the list either; read, it was given.
+                    at, score = _places.get(key, (None, None))
+                    if at is not None and at > _hit_at and key not in _early_rows:
+                        most = (_feed.prefix.settled + at[1] - _hit_at[1] + 1
+                                if at[0] == _hit_at[0] == 0 else None)
+                        found.append(_EarlyHit(key, at, most, score, addr, seam))
+            return sorted(found, key=lambda hit: hit.at)
+
+        def _feed_rows(early):
+            """Before a hit is read (*early*: out of turn): where the rows of the one before go."""
+            nonlocal _fed, _fed_at, _reading
+            if len(results) > _fed or _reading is not None:
+                new = results[_fed:]
+                if _reading is not None:
+                    del results[_fed:]
+                    _early_rows[_reading.key] = new
+                    if _feed_asked is not None:
+                        _feed_asked.extend((_reading.at, _reading.most, r) for r in new)
+                else:
+                    _fed = len(results)
+                    if _feed is not None:
+                        for r in new:
+                            _feed.add_main(r, _fed_at)
+            _reading = early
+            if early is None:
+                _fed_at = _hit_at
+
+        def _feed_step():
+            """Between two hits read in turn: ask for what the feed needs when it is time
+            (_early_queue), or, once that is read, let it hand over the rows that are certain."""
+            nonlocal _feed, _feed_due, _feed_last, _feed_asked
+            if _feed_asked is None:
+                now = time.perf_counter()
+                if not (_feed.settled >= _feed_due or (_feed.settled and now - _feed_last >= _PREVIEW_AFTER_S)):
+                    return
+                if not _feed.ready():
+                    return
+                wanted = _feed.prefix.wanted()
+                if any(wanted):
+                    _feed_asked = []
+                    _early_queue.extend(_linked_hits(*wanted))
+                    if _early_queue:
+                        return
+            if _feed_asked is not None:
+                _feed.prefix.checked(_feed_asked)
+                _feed_asked = None
+            done = _feed.send(_PREVIEW_ROWS)
+            _feed_last = time.perf_counter()
+            _feed_due = 0 if _feed.prefix.asks else 2 * _feed.settled
+            if done:
+                _feed = None
+
+        _with_feed = _feed is not None
         i = 0       # read below when the checkpoint before the aggregates stops an empty run
         try:
-            for i, (score, doc_addr, from_seam, set_aside_uid) in enumerate(_page_hits_then_aggregates()):
+            for i, (score, doc_addr, from_seam, set_aside_uid, early) in enumerate(_page_hits_then_aggregates()):
                 if progress_callback and (i % _PROGRESS_TICK_EVERY == 0
                                           or time.monotonic() - last_tick >= _PROGRESS_TICK_SECONDS):
                     # A page put aside is read twice: the count does not pass the hits.
                     progress_callback(min(i, total_hits), total_hits)
                     last_tick = time.monotonic()
+                if _with_feed:
+                    _feed_rows(early)
+                    if early is None:
+                        if _feed is not None:
+                            try:
+                                _feed_step()
+                            except (SearchBudgetExceeded, InterruptedError, MemoryError, ResponsaQueryRefused):
+                                raise       # the search's own: the crossings it reads are asked for here
+                            except Exception:
+                                # Early rows are a convenience; the search goes on without them.
+                                LOGGER.exception("Grouped preview failed")
+                                _feed = None
+                                _early_queue.clear()
+                        if _early_rows:
+                            read = _early_rows.pop((from_seam, doc_addr.segment_ord, doc_addr.doc), None)
+                            if read is not None:
+                                results.extend(read)
+                                continue
                 if set_aside_uid is not None and set_aside_uid in _v8_pages:
                     continue    # its page has a V0.8 row now: dropped unread (first_wins)
                 if _preview is not None:
@@ -5469,6 +5664,8 @@ class SearchEngine:
                     LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
         except InterruptedError:
             was_interrupted = True
+            if _reading is not None:
+                del results[_fed:]      # read out of turn: not where it belongs
             _note_search_cutoff(interrupted=True)
             LOGGER.debug(f"Search interrupted at hit {i}/{total_hits}, found {len(results)} results so far")
 

@@ -17,7 +17,6 @@ recording job queue in place of the worker processes. No index, no network.
 from __future__ import annotations
 
 import asyncio
-import gzip
 import os
 import pickle
 import re
@@ -28,6 +27,7 @@ import pytest
 
 os.environ.setdefault('GENIZAH_STORAGE_SECRET', 'search-within-cutoff-secret-0123456789abcdef')
 
+from shared.research_worker import open_output  # noqa: E402
 from tests.test_web_variant_settings_per_visitor import (  # noqa: E402
     FakeSearchEngine, run, store, submit, wait_for_payloads,
 )
@@ -118,7 +118,7 @@ def test_worker_result_carries_the_engines_cut_off(tmp_path, monkeypatch):
     payload = {'kind': 'search', 'method': 'execute_search', 'settings': None,
                'arguments': {'query_str': WORD, 'mode': 'literal', 'gap': 0, 'corpus_scope': 'genizah'}}
     research_worker.run_query(tmp_path, payload, lambda *a: None, meta=SimpleNamespace())
-    with gzip.open(tmp_path / 'output.pkl', 'rb') as stream:
+    with open_output(tmp_path / 'output.pkl') as stream:
         result = pickle.load(stream)
     assert result['cutoff'] == {'capped': True, 'interrupted': False}
 
@@ -624,7 +624,7 @@ def _run_worker(tmp_path, monkeypatch, time_limit, escape=False, **extra):
                'arguments': {'query_str': WORD, 'mode': 'literal', 'gap': 0, 'corpus_scope': 'genizah'},
                **extra}
     research_worker.run_query(tmp_path, payload, lambda *a: None, meta=SimpleNamespace())
-    with gzip.open(tmp_path / 'output.pkl', 'rb') as stream:
+    with open_output(tmp_path / 'output.pkl') as stream:
         return pickle.load(stream), seen
 
 
@@ -1149,7 +1149,7 @@ def test_the_worker_stops_a_letter_level_search_at_its_time_limit(tmp_path, monk
                    'options': {'path': str(tmp_path / 'passage'), 'preset': 'standard-40',
                                'length': 'normal', 'depth': 'normal', 'render_cap': None}}
         research_worker.run_query(root, payload, lambda *a: None, meta=SimpleNamespace())
-        with gzip.open(root / 'output.pkl', 'rb') as stream:
+        with open_output(root / 'output.pkl') as stream:
             return pickle.load(stream)
 
     whole = run_with(60, tmp_path / 'whole')

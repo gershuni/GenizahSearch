@@ -205,7 +205,7 @@ import shared.local_index_leases as leases
 leases.index_leases = lambda paths: contextlib.nullcontext()
 worker.preload = lambda: 'loaded catalogue'
 
-def run_query(root, payload, report, native_matching=False, meta=None):
+def run_query(root, payload, report, native_matching=False, meta=None, done=None):
     (root / 'output.pkl').write_bytes(pickle.dumps({'payload': payload, 'meta': meta}))
 worker.run_query = run_query
 worker.main(sys.argv[1])
@@ -404,6 +404,21 @@ def test_page_asks_for_early_rows_in_responsa_too():
     condition = ast.unparse(wanted[0].value)
     assert 'responsa' not in condition, condition
     assert 'not not_words' in condition and 'preview_shows_final_rows(search_state)' in condition
+
+
+def test_page_asks_for_early_rows_with_the_editions_too():
+    """With the scholarly transcriptions, the default where they are served, the page has early
+    rows (2026-11-25); a search of those alone has none to show."""
+    from types import SimpleNamespace
+    source = (ROOT / 'web' / 'pages' / 'search.py').read_text(encoding='utf-8')
+    values = [n.value for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Assign)
+              and any(isinstance(t, ast.Name) and t.id == '_preview_wanted' for t in n.targets)]
+    assert len(values) == 1
+    condition = compile(ast.Expression(values[0]), 'search.py', 'eval')
+    wanted = {sources: eval(condition, {'lab_mode': SimpleNamespace(value=False), 'not_words': [], 'search_state': None,
+                                        'preview_shows_final_rows': lambda _s: True, 'run_sources': sources})
+              for sources in (None, 'automatic', 'all', 'editions')}
+    assert wanted == {None: True, 'automatic': True, 'all': True, 'editions': False}
 
 
 def test_preview_translation_exists():

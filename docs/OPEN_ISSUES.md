@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-25 (archived GS-310). 188 open: P1 0, P2 41, P3 147.
+> **Last Updated:** 2026-11-25 (archived GS-312). 189 open: P1 0, P2 41, P3 148.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -22,7 +22,7 @@ the private repository; grep only).
 
 | Area | P1 | P2 | P3 | Total |
 |------|------|------|------|------|
-| Search | 0 | 4 | 21 | 25 |
+| Search | 0 | 4 | 22 | 26 |
 | Browse and viewer | 0 | 3 | 6 | 9 |
 | Desktop app | 0 | 9 | 31 | 40 |
 | Website | 0 | 5 | 29 | 34 |
@@ -33,7 +33,7 @@ the private repository; grep only).
 | Build, CI and tests | 0 | 0 | 5 | 5 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 3 | 1 | 4 |
-| **Total** | **0** | **41** | **147** | **188** |
+| **Total** | **0** | **41** | **148** | **189** |
 
 ## P1 - Critical
 
@@ -133,6 +133,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-311](ISSUE_DETAILS.md#gs-311) | A Fuzzy search of a common word with the scholarly editions shows its first rows only after the whole editions leg | `shared/editions_preview.py::GroupedPrefix` (needs the editions leg's rows, all of them), `shared/search_engine.py::_FuzzyMatcher` | 2026-11-25 | ❌ Open |
 | [GS-39](ISSUE_DETAILS.md#gs-39) | Responsa: a star word holding Hebrew punctuation is not refused | `shared/responsa_match.py::_TOKEN_RE`, `refuse_unsupported_stars` | 2026-10-23 | ❌ Open |
 | [GS-40](ISSUE_DETAILS.md#gs-40) | Responsa: a bracket group holding only a quote between two words blocks the sequence | `shared/responsa_match.py::_separator` | 2026-10-23 | ❌ Open |
 | [GS-41](ISSUE_DETAILS.md#gs-41) | Responsa: a My Library-only search's downgrade carries no effective options | `shared/search_engine.py` | 2026-10-22 | ❌ Open |

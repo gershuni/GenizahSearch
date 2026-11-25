@@ -329,7 +329,10 @@ def _last_editions_unavailable():
 class SearchThread(PausableSearchMixin, QThread):
     """Execute a search query asynchronously."""
 
-    results_signal = pyqtSignal(list)
+    # The list itself. pyqtSignal(list) copies it, every row and every member, into Qt's own
+    # types and back (2.2 of an Exact שלום's 6.1 seconds with the scholarly transcriptions,
+    # half of it on the UI thread).
+    results_signal = pyqtSignal(object)
     progress_signal = pyqtSignal(int, int)
     error_signal = pyqtSignal(str)
     # Phase 115: performance signal — (elapsed_ms: float, result_count: int)

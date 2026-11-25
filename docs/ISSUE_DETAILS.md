@@ -4540,3 +4540,22 @@ Codex on PR #111 after the review loop was capped. Read in the code, not reprodu
 
 Fix sketch: in `user_work_started`, replace an existing mark whose recorded `alive()` is False
 (or is not the calling thread's callback), instead of returning early.
+
+## GS-311
+
+**A Fuzzy search of a common word with the scholarly editions shows its first rows only after the whole editions leg** · P3 · Search · ❌ Open · opened 2026-11-25
+
+Where: `shared/editions_preview.py::GroupedPrefix` (needs the editions leg's rows, all of them), `shared/search_engine.py::_FuzzyMatcher`
+
+With the editions, the first grouped rows are worked out from the whole editions leg and the
+start of the main leg. For Exact, Variants and Responsa the editions leg is 0.7-3 seconds; for
+Fuzzy it is 5-8 seconds for `שלום` and 12-15 for `כתובה` (24,987 rows), where the automatic
+transcriptions alone show their first rows within a second. Regex has the same wait when its
+pattern is slow. Half of that time is the walk over the words of each text
+(`_FuzzyMatcher._first_words`), a quarter the highlight pattern of each row (`pattern_for`).
+A first try at the walk (the near spellings among a text's words found with one `findall`, then
+placed) was slower: most texts hold the word early, and the walk stops there.
+
+Two ways: the same bounds over a part of the editions leg too, its pages and linked editions
+looked up as the main leg's are; or the editions leg's rows handed over before what only a shown
+row needs (the highlight pattern, the snippet) is built.

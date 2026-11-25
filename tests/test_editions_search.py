@@ -170,14 +170,15 @@ def test_automatic_only_never_reads_the_editions(world):
         _search(world["eng"], "שלום", sources="automatic")
 
 
-def test_previews_only_without_editions(world, monkeypatch):
+def test_previews_not_of_the_editions_alone(world, monkeypatch):
+    # With both, tests/test_editions_preview.py.
     import shared.search_engine as se
     monkeypatch.setattr(se, "_PREVIEW_ROWS", 1)     # a preview as soon as one row is found
     seen = []
     _search(world["eng"], "ב", "Regex", sources="automatic", preview_callback=seen.append)
     assert seen, "today's previews"
     seen.clear()
-    _search(world["eng"], "ב", "Regex", sources="all", preview_callback=seen.append)
+    _search(world["eng"], "ב", "Regex", sources="editions", preview_callback=seen.append)
     assert seen == []
 
 
@@ -457,6 +458,9 @@ def test_group_results_ranks_and_local_rows():
     assert [r["uid"] for r in rows] == ["B", "A", "L"]
     # Members in rank order: the edition ranked first in its leg, the page second in its own.
     assert [m["uid"] for m in rows[0]["members"]] == ["ED:fgp:9", "B"]
+    # A result's display is its own (the desktop's viewer writes its page there).
+    assert rows[0]["display"] == rows[0]["members"][0]["display"]
+    assert rows[0]["display"] is not rows[0]["members"][0]["display"]
 
 
 def _ed(kind, eid, sys_id, page=None, shelf=None):

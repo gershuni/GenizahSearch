@@ -102,6 +102,8 @@ EXTRACTED_MODULES = [
     "shared/edition_search_text.py",     # editions search: an edition's search text, PR 1, 2026-11-15
     "shared/editions_indexer.py",        # editions search: the editions index builder, PR 1, 2026-11-15
     "shared/editions_search.py",         # editions search: switch, source choice, grouping, PR 2, 2026-11-15
+    "shared/editions_preview.py",        # editions search: the first grouped rows while it runs, 2026-11-25
+    "shared/gc_pause.py",                # the collector paused while many rows are made, 2026-11-25
     "shared/edition_target.py",          # editions search: opening a hit on its edition, PR 4b, 2026-11-16
     "shared/cudl_identity.py",           # structural CUDL identity, 2026-10-29
     "shared/arabic_normalize.py",        # Arabic dictionary readings and keys, 2026-11-04

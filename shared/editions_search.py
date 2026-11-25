@@ -451,6 +451,16 @@ def group_results(main_rows: Sequence[Dict[str, Any]], edition_rows: Sequence[Di
     ``_matches``.
 
     *ids_only*: light rows, one per group key (``uid``, ``display``, ``scope``)."""
+    out = _group_ranked(enumerate(main_rows, start=1), enumerate(edition_rows, start=1),
+                        enumerate(local_rows, start=1), ids_only=ids_only, match_count=match_count, k=k)
+    return out if ids_only else fold_same_text(out)
+
+
+def _group_ranked(main: Iterable[Tuple[int, Dict[str, Any]]], editions: Iterable[Tuple[int, Dict[str, Any]]],
+                  local: Iterable[Tuple[int, Dict[str, Any]]], *, ids_only: bool = False,
+                  match_count: Optional[Callable[[Dict[str, Any]], int]] = None,
+                  k: int = RRF_K) -> List[Dict[str, Any]]:
+    """``group_results`` before folding, from each leg's ``(rank, row)`` pairs."""
     groups: Dict[str, Dict[str, Any]] = {}
     order: List[Dict[str, Any]] = []
 
@@ -463,11 +473,11 @@ def group_results(main_rows: Sequence[Dict[str, Any]], edition_rows: Sequence[Di
         g["members"].append((1.0 / (k + rank), 0 if leg == "main" else 1, len(g["members"]), row))
         g["best"].setdefault(leg, rank)
 
-    for rank, row in enumerate(main_rows, start=1):
+    for rank, row in main:
         add(row, "main", rank)
-    for rank, row in enumerate(edition_rows, start=1):
+    for rank, row in editions:
         add(row, "editions", rank)
-    for rank, row in enumerate(local_rows, start=1):
+    for rank, row in local:
         order.append({"key": None, "members": [(0.0, 2, 0, row)], "best": {"local": rank}, "local": True})
 
     def score(g: Dict[str, Any]) -> float:
@@ -486,6 +496,8 @@ def group_results(main_rows: Sequence[Dict[str, Any]], edition_rows: Sequence[Di
                         "scope": best.get("scope", "page")})
             continue
         row = dict(best)
+        # Its own: the desktop writes the page its viewer is on there, which is not its member's.
+        row["display"] = dict(best.get("display") or {})
         row["uid"] = g["key"]
         row.pop("group_key", None)
         row["members"] = members
@@ -499,7 +511,7 @@ def group_results(main_rows: Sequence[Dict[str, Any]], edition_rows: Sequence[Di
             for m in members:
                 m.pop("_matches", None)
         out.append(row)
-    return out if ids_only else fold_same_text(out)
+    return out
 
 
 def _hit_key(member: Dict[str, Any]) -> Optional[Tuple[str, Any]]:
@@ -547,6 +559,28 @@ def fold_same_text(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     The rows' order decides where a row goes first; two results the first pass left apart are
     joined afterwards when they hold one text and the rules above allow it (``_join_linked``),
     so a text the rules allow as one result is one in whatever order its rows rank."""
+    return [_folded_row(c) for c in _fold_clusters(rows)]
+
+
+def _fold_clusters(rows: Sequence[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    """``fold_same_text``'s results, each as the rows it is made of in rank order.
+
+    A result of automatic text alone, in a manuscript where every edition found has its page, is
+    always one of its own: it shares no hit, and nothing looks for its manuscript. Most of a
+    common word's results are (45,700 of the 53,100 for #שלום), and looking each of them up among
+    the others was most of the time the two legs took to become one list."""
+    unplaced = {_row_sys_id(row) for row in rows if row.get("page_identified") is False}
+    alone = {id(row) for row in rows
+             if "members" not in row or (row.get("edition_match") is False and _row_sys_id(row) not in unplaced)}
+    position = {id(row): i for i, row in enumerate(rows)}
+    clusters = _fold_linked([row for row in rows if id(row) not in alone])
+    clusters += [[row] for row in rows if id(row) in alone]
+    clusters.sort(key=lambda c: position[id(c[0])])
+    return clusters
+
+
+def _fold_linked(rows: Sequence[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    """``_fold_clusters`` of the rows that can be joined with another."""
     position = {id(row): i for i, row in enumerate(rows)}
     clusters: List[List[Dict[str, Any]]] = []
     hits: List[set] = []                # each cluster's hit keys
@@ -616,7 +650,7 @@ def fold_same_text(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
             # hit on another page of the manuscript is a find of its own beside it.
             if row.get("page_identified") is False and all(_editions_only(r) for r in clusters[target]):
                 unplaced_sys.setdefault(sid, target)
-    return [_folded_row(c) for c in _join_linked(clusters, position)]
+    return _join_linked(clusters, position)
 
 
 class _Result:

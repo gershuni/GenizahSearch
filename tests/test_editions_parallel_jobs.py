@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import psutil
 import pytest
@@ -43,6 +44,25 @@ elif leg == 'editions':
                        'edition': {'kind': 'fgp', 'uid': 'ED:fgp:1'}}], 'leg': {'warning': None}}
 else:
     value = {'method': request['method'], 'arguments': args}
+if 'early' in query:
+    # The editions worker leaves its rows; the main one shows what it makes of them, and only
+    # then goes on.
+    from shared.research_worker import read_editions_result, write_editions_result, write_preview
+    if leg == 'editions':
+        write_editions_result(request['editions_file'], {'value': value, 'cutoff': {'capped': True}})
+        if 'lost' in query:
+            os._exit(9)         # it failed in saving what it found
+    else:
+        while read_editions_result(request['editions_file']) is None:
+            time.sleep(0.01)
+        if 'unshown' in query:
+            time.sleep(0.5)
+        else:
+            first = 'P1' if 'wrongly' in query else 'P2'
+            found = read_editions_result(request['editions_file'])['value']['rows'][0]['uid']
+            write_preview(root, 1, [{'uid': first, 'from': found}])
+        (Path(os.environ['GENIZAH_TEST_PID_DIR']) / 'shown').touch()
+        time.sleep(0.5)
 cutoff = {'capped': 'capped' in query and leg == 'editions', 'interrupted': False}
 out = {'value': value, 'downgrade': None, 'cascade': None, 'cutoff': cutoff, 'time_limit': False,
        'payload': request, 'editions_unavailable': 'edunavailable' in query}
@@ -108,9 +128,43 @@ def test_the_two_legs_run_at_once_and_come_back_as_one_result_per_page(queues):
     assert legs['main'][0] is queues['main'] and legs['editions'][0] is queues['editions']
     for leg, (_q, payload) in legs.items():
         assert payload['method'] == 'execute_search_leg'
-        assert 'sources' not in payload['arguments'] and 'preview' not in payload
+        assert 'sources' not in payload['arguments']
+        # Early rows were asked for: the editions leg leaves its rows where the main leg looks.
+        assert payload['preview'] and payload['editions_file'] == legs['main'][1]['editions_file']
         assert payload['time_limit']
     assert consume_editions_skipped() is False
+
+
+@pytest.mark.parametrize('query', ['early', 'early wrongly'])
+def test_the_main_worker_shows_early_rows_once_the_editions_worker_left_its_rows(queues, query):
+    from shared import editions_preview
+    early = []
+    with patch.object(editions_preview.LOGGER, 'error') as said:
+        rows = _engine().execute_search(query, 'literal', 0, corpus_scope='genizah', sources='all',
+                                        preview_callback=early.append)
+    assert [r['uid'] for r in rows] == ['P2', 'P1']
+    assert [[r['from'] for r in shown] for shown in early] == [['ED:fgp:1']], 'handed on while the search ran'
+    assert said.called is ('wrongly' in query)      # early rows that were not its first: said
+    # The file the two workers shared is gone with the search.
+    assert not Path(queues['submitted'][0][1]['editions_file']).parent.exists()
+
+
+def test_an_editions_worker_lost_after_its_early_rows_were_shown_is_not_lost_to_the_list(queues):
+    # Codex review of dev PR #128: the rows shown are the start of the list also when that worker
+    # fails in saving what it found. With none shown, the main rows stand alone, as before.
+    early = []
+    rows = _engine().execute_search('early lost', 'literal', 0, corpus_scope='genizah', sources='all',
+                                    preview_callback=early.append)
+    assert early and [r['uid'] for r in rows] == ['P2', 'P1'] and len(rows[0]['members']) == 2
+    assert consume_editions_skipped() is False and consume_last_search_cutoff()['capped'] is True
+    rows = _engine().execute_search('early lost unshown', 'literal', 0, corpus_scope='genizah', sources='all',
+                                    preview_callback=early.append)
+    assert [r['uid'] for r in rows] == ['P1', 'P2'] and consume_editions_skipped() is True
+
+
+def test_without_early_rows_the_workers_share_no_file(queues):
+    _engine().execute_search('q', 'literal', 0, corpus_scope='genizah', sources='all')
+    assert all('editions_file' not in p and 'preview' not in p for _q, p in queues['submitted'])
 
 
 def test_a_search_that_shows_its_first_rows_runs_in_one_worker(queues):

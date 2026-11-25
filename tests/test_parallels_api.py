@@ -1209,7 +1209,6 @@ def test_a_background_job_the_time_limit_stopped_says_more_may_exist(client, cle
     SearchEngine.search_composition_logic over a real (tiny) index, which the limit
     stops at its first chunk -> the response says results_cut_off."""
     pytest.importorskip('tantivy')
-    import gzip
     import pickle
     from unittest.mock import MagicMock
 
@@ -1234,7 +1233,7 @@ def test_a_background_job_the_time_limit_stopped_says_more_may_exist(client, cle
             root = tmp_path / f'job{len(results)}'
             root.mkdir()
             research_worker.run_query(root, payload, lambda *a: None, meta=_Meta())
-            with gzip.open(root / 'output.pkl', 'rb') as stream:
+            with research_worker.open_output(root / 'output.pkl') as stream:
                 result = pickle.load(stream)
             results.append(result)
             job = Job(payload)

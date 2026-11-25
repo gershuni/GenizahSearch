@@ -6273,9 +6273,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # could hide one; the completed search then renders the whole list.
         _preview_wanted = (not lab_mode.value and not not_words
                            and preview_shows_final_rows(search_state)
-                           # With the scholarly transcriptions the order is known only at
-                           # the end: no early rows (editions plan section 5).
-                           and run_sources in (None, 'automatic'))
+                           # A search of the scholarly transcriptions alone has none.
+                           and run_sources != 'editions')
         _loop = asyncio.get_running_loop()
         _preview_ready = asyncio.Event()
         _preview_box = {'rows': None}

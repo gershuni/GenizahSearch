@@ -7,6 +7,12 @@ import pickle
 import sys
 import time
 
+from shared.gc_pause import gc_paused
+
+
+class OutputTooLarge(ValueError):
+    pass
+
 
 class MeasuredWriter:
     def __init__(self, stream, limit):
@@ -15,7 +21,7 @@ class MeasuredWriter:
     def write(self, data):
         self.size += len(data)
         if self.size > self.limit:
-            raise ValueError('Expanded search output exceeds its memory allowance.')
+            raise OutputTooLarge('Expanded search output exceeds its memory allowance.')
         return self.stream.write(data)
 
 
@@ -53,6 +59,80 @@ def write_preview(root, sequence, rows):
             return
         except OSError:
             time.sleep(0.02 * (attempt + 1))
+
+
+# Edition rows past this rank are handed over without their texts (a common near spelling's
+# are 100 MB): the early rows show the first ones.
+HANDED_WITH_TEXT = 1000
+
+
+def write_editions_result(path, result):
+    """Leave the editions leg's *result* for the main leg's worker (read_editions_result), before
+    it is saved for the parent, which takes longer; the parent keeps to it too, when early rows
+    were shown from it and this worker then fails (web/research_jobs.py). Best effort: without
+    it there are no early rows, and nothing here (the parent's directory gone, memory short) may
+    cost the rows themselves, which are found and still to be saved."""
+    path = Path(path)
+    temporary = path.with_suffix('.tmp')
+    try:
+        value = result['value']
+        light = [row if n < HANDED_WITH_TEXT
+                 else {k: v for k, v in row.items() if k not in ('full_text', 'raw_file_hl')}
+                 for n, row in enumerate(value['rows'])]
+        with temporary.open('wb') as stream:
+            pickle.dump({**result, 'value': {**value, 'rows': light}}, stream, protocol=pickle.HIGHEST_PROTOCOL)
+        temporary.replace(path)
+    except Exception:       # MemoryError too: it ends here, with what it was for
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def read_editions_result(path):
+    """What write_editions_result left at *path*, or None until it has."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        # Only our own subprocess writes this private temporary file.
+        with path.open('rb') as stream, gc_paused():
+            return pickle.load(stream)
+    except (OSError, EOFError, pickle.UnpicklingError):
+        return None
+
+
+# A result larger than this, or than the parent takes (GENIZAH_RESEARCH_RESULT_MB), is saved
+# compressed. Below it, compressing costs several times what it saves in writing and reading:
+# 4.3 of the 4.7 seconds a 170 MB result took to save, and 1.2 of the 2.0 it took to load.
+PLAIN_OUTPUT_MAX_BYTES = 256 * 1024**2
+
+
+def save_output(path, result):
+    """Save *result* at *path*, plain or, when that is too large a file, compressed (it is
+    streamed, without allocating another full serialized copy). Returns its serialized size."""
+    try:
+        allowed = int(os.environ.get('GENIZAH_RESEARCH_RESULT_MB') or 512) * 1024**2
+    except ValueError:
+        allowed = PLAIN_OUTPUT_MAX_BYTES
+    try:
+        with open(path, 'wb') as stream:
+            measured = MeasuredWriter(stream, min(PLAIN_OUTPUT_MAX_BYTES, allowed))
+            pickle.dump(result, measured, protocol=pickle.HIGHEST_PROTOCOL)
+        return measured.size
+    except OutputTooLarge:
+        pass
+    with gzip.open(path, 'wb', compresslevel=1) as stream:
+        measured = MeasuredWriter(stream, int(os.environ['GENIZAH_RESEARCH_MEMORY_MB']) * 1024**2)
+        pickle.dump(result, measured, protocol=pickle.HIGHEST_PROTOCOL)
+    return measured.size
+
+
+def open_output(path):
+    """A worker's output.pkl for reading, compressed or not."""
+    with open(path, 'rb') as stream:
+        compressed = stream.read(2) == b'\x1f\x8b'
+    return gzip.open(path, 'rb') if compressed else open(path, 'rb')
 
 
 def wait_for_input(root, poll=0.02):
@@ -128,7 +208,9 @@ def protect_parent_death(parent_pid):
     return True
 
 
-def main(directory):
+def main(directory, *, done=None):
+    """*done*: called once the result is saved (the worker's process exits there: freeing what
+    the search built, row by row, kept a common word's result waiting half a second)."""
     parent_pid = int(os.environ['GENIZAH_RESEARCH_PARENT'])
     native_matching = protect_parent_death(parent_pid)
     from shared.research_limits import limit_memory
@@ -198,7 +280,7 @@ def main(directory):
     with index_leases(leased):
         write_progress(root, {'status': 'Starting search worker', 'progress': (0, 0)})
         try:
-            run_query(root, payload, report, native_matching=native_matching, meta=meta)
+            run_query(root, payload, report, native_matching=native_matching, meta=meta, done=done)
         finally:
             # Drop engine cycles/native handles before releasing the read lease.
             import gc
@@ -248,7 +330,7 @@ def _time_limited(report, seconds, stopped, started=None):
     return progress
 
 
-def run_query(root, payload, report, *, native_matching=False, meta=None):
+def run_query(root, payload, report, *, native_matching=False, meta=None, done=None):
     stopped = {'time_limit': False}
     try:
         from shared.metadata_manager import MetadataManager
@@ -315,13 +397,22 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
             # The letter-level searcher leaves progress_callback alone (the desktop's
             # drives a chunk progress bar); it is stopped through `checkpoint`.
             arguments['checkpoint'] = arguments['progress_callback']
-        if payload.get('preview') and kind == 'search' and payload['method'] == 'execute_search':
+        editions_file = payload.get('editions_file')
+        previews = payload.get('preview') and kind == 'search' and (
+            payload['method'] == 'execute_search'
+            or (payload['method'] == 'execute_search_leg' and arguments.get('leg') == 'main' and editions_file))
+        if previews:
             sent = [0]
 
             def preview(rows):
                 sent[0] += 1
                 write_preview(root, sent[0], rows)
             arguments['preview_callback'] = preview
+            if payload['method'] == 'execute_search_leg':
+                def edition_rows():
+                    left = read_editions_result(editions_file)
+                    return None if left is None else left['value']['rows']
+                arguments['edition_rows'] = edition_rows
         write_progress(root, {'status': 'Preparing search', 'progress': (0, 0)})
         with isolated_matching(native=native_matching):
             value = getattr(engine, payload['method'])(**arguments)
@@ -334,6 +425,8 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
                   # Asked to read the editions, and none could be opened here.
                   'editions_unavailable': consume_editions_unavailable(),
                   'time_limit': stopped['time_limit']}
+        if editions_file and payload['method'] == 'execute_search_leg' and arguments.get('leg') == 'editions':
+            write_editions_result(editions_file, result)
     except InterruptedError:
         # The limit stopped a part of the search that cannot return what it had.
         result = {'error': 'The search reached its time limit.', 'time_limit': True}
@@ -347,14 +440,12 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         import traceback
         traceback.print_exc()
         result = {'error': 'The search worker could not complete this query. No complete results were returned.'}
-    # Transcriptions and HTML contain considerable repetition. Stream the
-    # transfer compressed without allocating another full serialized copy.
     write_progress(root, {'status': 'Saving search results', 'progress': (0, 0)})
-    with gzip.open(root / 'output.pkl', 'wb', compresslevel=1) as stream:
-        measured = MeasuredWriter(stream, int(os.environ['GENIZAH_RESEARCH_MEMORY_MB']) * 1024**2)
-        pickle.dump(result, measured, protocol=pickle.HIGHEST_PROTOCOL)
-    (root / 'output-size.json').write_text(json.dumps({'expanded_bytes': measured.size}), encoding='utf-8')
+    size = save_output(root / 'output.pkl', result)
+    (root / 'output-size.json').write_text(json.dumps({'expanded_bytes': size}), encoding='utf-8')
+    if done is not None:
+        done()
 
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    main(sys.argv[1], done=lambda: os._exit(0))

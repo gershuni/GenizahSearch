@@ -229,6 +229,11 @@ def test_search_thread_passes_the_callback_and_emits_the_preview():
 
     t = SearchThread(Fake(), "q", "literal", 0)
     got = []
+    done = []
     t.preview_signal.connect(got.append)
+    t.results_signal.connect(done.append)
     t.run()                       # same thread: the signal is delivered directly
     assert got == [rows]
+    # The result is handed over as it is: a pyqtSignal(list) would copy every row of it, and
+    # every member of those, twice (2.2 of 6.1 seconds for a common word with the editions).
+    assert done[0] is rows
