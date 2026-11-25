@@ -774,9 +774,12 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "11.0.0-shelf"
-# The keys before it, newest first. 11.0.0's key needs the shelf tree served (the switch on and
-# the file checked: it goes to the server after the code); 10.1.0's needs the catalogue text
+WHATS_NEW_VERSION = "11.2.0-quicklook"
+# The keys before it, newest first. 11.2.0's key (Quick look) took the place of 11.0.0's
+# ("11.0.0-shelf"): both lines are about Pick from the shelf and share its gate, so one key
+# serves both, and a reader who dismissed 11.0.0's news gets the dot once for Quick look.
+# It needs the shelf tree served (the switch on and the file checked: it goes to the server
+# after the code); 10.1.0's needs the catalogue text
 # search served (switch and file); 10.0.0's needs the scholarly transcriptions served to every
 # reader (switch and index); 9.16.0's needs the letter-level index. Where a gate is off, the key
 # stays at the one before, so the unread dot lights only where the new entry is there to read.
@@ -1918,6 +1921,13 @@ def create_layout():
     if shelf_tree_available():
         _new_surfaces.insert(0, (tr('New: Pick from the shelf - choose manuscripts by library and '
                                     'collection, preview them, and open one or several together.'),
+                                 '/browse'))
+    # v11.2.0 (2026-11-25), approved with the release texts, newest on top. Gated like the
+    # shelf line (Quick look is in Pick from the shelf), and under the same key.
+    if shelf_tree_available():
+        _new_surfaces.insert(0, (tr('New: Quick look in Pick from the shelf - press Q on a shelfmark to '
+                                    'see its image filling the window, and move along the shelf with '
+                                    'the arrows. Press W to open Pick from the shelf!'),
                                  '/browse'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON

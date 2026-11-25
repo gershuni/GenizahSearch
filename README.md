@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 11.1.0
+# Dicta Genizah Search Pro 11.2.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,19 +8,20 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 11.1.0?
+## What's New in Version 11.2.0?
 
-**Fixes and improvements**
+**Quick look and faster search**
 
-In the desktop app, the program starts faster, and the state you were in (a search or browsing a
-manuscript) is restored more quickly. A Reading Desk left open comes back on the next start, as you
-left it, and the desk's image button shows and hides its images. On the website, Browse, the Reading
-Desk and Pick from the shelf fit a phone; A- / A+ set the size of the text; and Copy text, Print,
-Edit and Send Comment stand beside the text, with Copy shelfmark and Share on the shelfmark's card.
-A shelfmark clicked in the Reading Desk opens in Browse with a way back to the desk. In both apps,
-the credit under an image names the source the image came from. Also fixed: several manuscripts
-chosen from the home page or the header all open in the Reading Desk, and a correction draft stays
-with the page it was written on.
+In Pick from the shelf, press Q on a shelfmark — or the full-screen button under its image — to see
+its image filling the window, and move with the arrows from shelfmark to shelfmark along the shelf
+without leaving it. The details beside the shelf now show the manuscript's other images, zoom and
+rotate, and choose all of a join's partners at once; the details can be hidden to give the
+thumbnails room, and the thumbnails have an Extra large size. The keyboard works the same way in
+both apps. Searches of the scholarly transcriptions together with the automatic ones — the
+website's default — and Responsa searches show their first results while they run, and the full
+list comes sooner. Also fixed: the National Library of Russia's images show in the desktop's Pick
+from the shelf, a microfilm's thumbnail is a page of the manuscript rather than its START frame, and
+the desktop Reading Desk of a PGP document shows that document's own edition, once.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md).
 
@@ -100,7 +101,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V11.1.0_Setup.exe`, about 667 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
+1. **Download:** the installer (`GenizahSearchPro_V11.2.0_Setup.exe`, about 667 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

@@ -8,6 +8,300 @@ which is not public.
 
 ---
 
+## [11.2.0] - 2026-11-25 — Quick look and faster search
+
+### New Features
+- **Quick look in Pick from the shelf** (both apps): Q on a shelfmark, or the full-screen button
+  under the details' image, shows its image filling the picker (desktop) or the browser window
+  (website), sized to the screen. The arrows go to the previous / next shelfmark and on along the
+  shelf into the next volume or collection; Shift + an arrow, Up / Down or Page Up / Page Down go
+  through the manuscript's images. Zoom and rotate as in the details.
+  Space chooses the shelfmark, Enter opens it, Esc or Q goes back to the list.
+
+### Improvements
+- **Results while the search runs, with the scholarly transcriptions too** (both apps): a search
+  of the automatic and the scholarly transcriptions together (the website's default) shows its
+  first results while it runs, as a search of the automatic transcriptions alone does; Responsa
+  search does the same. The full list also comes sooner (for example, Exact `שלום` on the website:
+  first results after about 2.5 seconds, the whole list in 5.3 instead of 9.6).
+- **Room for the thumbnails** (both apps): the details pane can be hidden, and the thumbnails have
+  an Extra large size (also in the desktop Join Workbench and the website's Joins Lab), with
+  sharper images at the larger sizes.
+- **The details pane**: the manuscript's other images ("Image 2 of 6"), zoom (+ / -, the mouse
+  wheel, a drag) with a sharper image once zoomed in, rotate a quarter, and one box before "Joins"
+  that chooses all of a join's partners. On the website, ticking a join also ticks the shelfmark
+  shown, as on the desktop. On the desktop the details open on the manuscript's first image; a
+  microfilm's tile and details open on its middle image (both apps), past the National Library of
+  Russia's START frame and catalogue card.
+- **The same keyboard in both apps** in Pick from the shelf: Tab moves between the lists, the arrows,
+  Home / End and Page Up / Page Down move within them, F6 reaches the buttons and the details,
+  S turns Open more than one on or off, Ctrl+F filters the list, Alt+D shows or hides the details.
+  On the website, each list is one Tab stop and W opens Pick from the shelf from any page. The
+  tooltips name the keys.
+- **Search API**: `POST /api/search` builds only the results it returns, so common words answer
+  sooner (`#שלום`: 12-16 seconds instead of 20-30, and no longer a timeout with variants).
+- **Blau's dictionary** (website): the MiDRASH credit names the project team at Bar-Ilan University
+  and the Eliyahu Lab, University of Haifa.
+
+### Bug Fixes
+- **The National Library of Russia's images in the desktop Pick from the shelf** (the tiles, the
+  details and the quick look were blank, while Browse and the website showed them): every desktop
+  request to an NLI image host now carries the `Referer` NLI asks for. A refused image no longer
+  closes NLI off for a minute, and a tile that did not come is asked for again.
+- **The desktop Reading Desk of a PGP document** shows that document's own edition once, with a
+  switch between Edition, Translation and By fragment, instead of an edition under every fragment
+  that was sometimes another document's (GS-307). On the dark theme its text side no longer draws
+  light rows with light text.
+- **Search API**: a parallel found across a page break is the page it starts on, with that page's
+  uid and locator, which `/api/browse` accepts.
+- **Pick from the shelf**: the desktop image arrows point the right way in Hebrew; on the website,
+  the next image is prefetched as intended, and the keyboard's row is framed inside it.
+
+### Internal
+- `tests/lane_durations.json` is folded from the public CI's own Windows timings
+  (`scripts/fold_lane_timings.py`); a local-data release lane (`run_local_tests.py --local-data`)
+  runs the tests that CI skips for want of data.
+- No sidecar changes: code only, for the website and the installer.
+
+### Pick from the shelf: a quick look at a shelfmark's image, filling the window (web + desktop)
+
+Asked by a reader who sifts through the shelf by its thumbnails: to read a fragment without leaving
+the shelf.
+
+- **Quick look.** Q on a shelfmark (from any list; by the key, so ק on a Hebrew keyboard does the
+  same), or a new full-screen button under the details' image, shows that shelfmark's image filling
+  the picker (desktop) or the browser window (website). The picture already at hand shows at once
+  (the tile's, or the page the details show); then the same image comes sized to the window: asked at
+  the width that fills it, in steps of 200 pixels between 400 and 1,600, so a laptop asks about 800
+  and a large screen more, never the full-size scan. Zoomed in, it is asked for once more at twice
+  that width (up to 2,000).
+- **Moving in it.** The arrows go to the previous / next shelfmark of the list under it (mirrored in
+  Hebrew), Home / End to the first / last; past the list's ends they go on along the shelf, into the
+  next or previous volume or collection (its bar then names that group, and closing takes the picker
+  there). Shift or Ctrl + an arrow, Up / Down or Page Up / Page Down go through the manuscript's images
+  ("Image 2 of 6"). The next image and the next shelfmark's first image are fetched before they are
+  asked for. Its bar says where it is ("12 of 48").
+- **The first image first** (desktop): the details and the quick look open on the manuscript's first
+  image. The catalogue's thumbnail need not be it (T-S 6 H 2.5 opened on its second); it shows until the
+  first comes.
+- **A microfilm opens on its middle image** (both apps, the details and the quick look): the National
+  Library of Russia's images begin with a START frame and a catalogue card (`opening_image`; three
+  images: the third). Its other images are a step away as before.
+- **Q on the shelfmark the details show** opens the quick look at the details' image and turn, as their
+  button does.
+- **Website: never a broken picture while it loads.** The quick look shows the picture at hand blurred
+  (the details' page, the tile's, else that page small) with a spinner over it until the sharp one has
+  come; with nothing yet, an empty place and the spinner.
+- **The National Library of Russia's images on the desktop** (blank in the details, the tiles and the quick
+  look, while Browse and the website showed them): NLI gives them only to a request from its own site, and
+  the picker sent no `Referer`. Every desktop request to an NLI image host now carries it
+  (`shared/nli_fetch.py::nli_headers_for`): also the Join Workbench's thumbnails and the puzzle's images.
+- **A refused image is not an NLI outage** (`nli_refused`, both apps): three refusals no longer close NLI off
+  for a minute.
+- **A tile that did not come is asked for again** (desktop, `NOT_COME`): after 65 seconds, three times at
+  most; before, it stayed at "none" until the picker was closed.
+- **A microfilm's tile is its middle image**, the one its details open on, so they fetch no second picture.
+  Desktop: `_tile_url`. Website: `/api/nli_image_by_sysid/{id}?middle=1` works it out from the image list
+  the route reads anyway.
+- **Shift + an arrow** from a list is the details' previous / next image too, as Ctrl + an arrow.
+- **The keys in the tooltips**: zoom ("Zoom in (+)"), turn ("Rotate left (Shift+R)"), the images'
+  and the shelfmarks' arrows, in the details and in the quick look, both apps.
+- **Zoom and turn** as in the details: the mouse wheel at the pointer, + / - / 0, a drag once zoomed;
+  R / Shift+R turn it a quarter (also from a list, for the details' image). Opened from the details it
+  starts at their page and turn; another shelfmark starts upright.
+- **Choosing from it.** Space chooses the shelfmark (with several at once: ticks it; its box on the
+  bar shows it), Enter opens it as Enter in the list does (one: the picker's own button; several:
+  Open). Esc, Q or its close button goes back to the list, at the shelfmark looked at last, chosen as a
+  click chooses it, with the keyboard on its row.
+- Desktop: the quick look covers the picker's window; Tab, Ctrl+F and F6 stay with it while it is
+  open. Website: it is a dialog over the picker, which Esc closes alone; its bar holds the way back and
+  the shelfmark at the start, the images in the middle, the tools at the end (two lines on a phone), the
+  picture fitted to the place under it.
+- Shared: `shared/shelfmark_tree_details.py` (`look_width`, `look_sharp_width`, `image_key`). Tests:
+  `tests/test_shelf_picker_desktop_quicklook.py`, `tests/test_shelf_picker_desktop_nli_images.py`,
+  `tests/render_smoke/test_shelf_picker_quicklook_render_smoke.py`, `tests/test_shelf_picker_web_keys.py`.
+
+### Pick from the shelf: room for the thumbnails, a manuscript's pages in the pane, its joins at once (web + desktop)
+
+Asked by a reader who sifts through the shelf by its thumbnails.
+
+- **The details pane can be hidden.** A button in the picker's header (desktop: "Details"; website:
+  its side-panel icon) hides the pane and gives its room to the shelfmarks and their thumbnails;
+  pressed again, the pane comes back with the shelfmark clicked last. The choice is kept. On the
+  desktop a hidden pane reads nothing (no network call) until it is shown. A phone keeps folding the
+  pane under the list as before.
+- **Extra large thumbnails**, in the picker, the desktop Join Workbench and the website's Joins Lab
+  (one card a row there). The larger sizes ask NLI for sharper pictures: the desktop picker's Large
+  at 600 pixels (as the website's has been) and Extra large at 800, the website's Extra large at
+  800, the Join Workbench's Extra large at 600. The picture already fetched stays on show until the
+  sharper one comes; a smaller answer that comes late never replaces a sharper one. Small and
+  Medium ask as before.
+- **A manuscript's other images in the pane.** Under the pane's picture, previous / next and where
+  it is ("Image 2 of 6") when the manuscript has more than one image; the next one is fetched before
+  it is asked for, and the images seen stay at hand (desktop: the image list Browse uses; website:
+  the site's own image route by page). On the desktop the thumbnail is the catalogue record's first
+  image, which need not be the image list's first: the pane counts it where it is in the list
+  ("Image 2 of 3"), and one the list does not name gives way to the list's first image, so a step
+  never shows the same picture again.
+- **A box before the pane's "Joins"** (with two partners or more on the shelf): it shows whether
+  all, some or none of the partners are chosen; a click chooses them all, the multiple choice turned
+  on first as one partner's box does, and when all are chosen a click unticks them (the shelfmark
+  shown stays); one change, so the limit counts them together.
+- **The pane's picture zooms**: + / - under it, or the mouse wheel over it (at the pointer), a drag
+  to move around once zoomed, a double click to fit it again. Once zoomed in, the picture on show is
+  asked for again at 1,200 pixels, for that page only, and put in place at the same zoom (desktop:
+  NLI's image server; website: the site's own image route). Another page opens fitted. The desktop
+  pane's picture is a little taller (220 pixels).
+- **The pane's image arrows are the style's own arrows** on the desktop: the text arrows (‹ ›) are a
+  Unicode mirrored pair and came out both pointing right in Hebrew. As on Browse's previous / next
+  manuscript, in Hebrew previous is on the right pointing right and next on the left pointing left.
+- **On the website, ticking a join now ticks the shelfmark the pane shows too**, as the desktop
+  always has: the fragments of a join are chosen together (it first, then the partner, in one
+  change). Unticking a join takes out the partner alone.
+- **The keyboard, the same in both apps.** Tab / Shift+Tab go from list to list alone, the filters and
+  buttons passed by (desktop: round, from the last to the first; website: past the ends the page's
+  order goes on); Tab in a filter goes into its list; F6 / Shift+F6 leave the lists for the buttons and
+  the details, and come back to the list last in use. On the website each
+  list is now one Tab stop (its rows were each their own, so a column of 200 shelfmarks took 200 Tabs),
+  and the arrows, Home / End and Page Up / Page Down move in it, by rows and columns in the thumbnails.
+  In a column the arrow forward opens the row and goes into its list once it is drawn, the arrow back
+  goes to the list before (from the first, one level up); mirrored in Hebrew. Space chooses (ticks),
+  Enter opens, as before. From a list: Ctrl + an arrow is the pane's previous / next image (as its arrows
+  on screen), + / - / 0 zoom its picture, 1 / 2 / 3 the shelfmarks as a list, a table or thumbnails,
+  [ / ] the thumbnails smaller / larger (by the key, so a Hebrew layout works the same). Ctrl+F the
+  filter of the list in use, Esc back to the list (it no longer closes the picker from a filter on the
+  website), Alt+D the details pane. Alt+D and Ctrl+F go by the key, so they work on a Hebrew
+  keyboard too (on the desktop they matched the letter, and Alt+D there is Alt+ג; both now answer
+  the key on the application while the picker is in front, as the main window's own keys do).
+- **Website, as on the desktop:** the keyboard starts in a list when the picker opens (the list of the
+  next choice: the column none of whose rows is open, else the shelfmarks), and an arrow pressed while
+  it is nowhere goes there; a column's row opened (by a click, Enter or Space) takes the keyboard into
+  the list it opens; moving through the shelfmarks with the arrows selects the one it rests on (the
+  pane shows it, Open takes it), as a click does; the column row the keyboard is on looks chosen. Desktop: a table's Tab no longer walks its cells.
+- **Website: the next image's prefetch** no longer raised in the server's console (it ran from a
+  background task without a page); the next image is now asked for ahead, as intended.
+- **Several at once by the keyboard** (both apps): S turns Open more than one on or off; then Space
+  ticks and Enter is the Open button (it used to tick like Space): what is ticked opens, and with
+  nothing ticked the row Enter was pressed on first.
+- **W opens Pick from the shelf on any web page** (outside a box you type in; the desktop's Ctrl+W,
+  which a browser keeps for closing its tab): Browse's own button, at the manuscript shown, else the
+  header's. On the keyboard card.
+- **The picture turns a quarter** (both apps): rotate left / right beside the zoom; another page of
+  the manuscript keeps the turn, another shelfmark starts upright.
+- **Website: the row the keyboard is on is framed inside it.** The site's focus ring is drawn outside
+  the element, and in a list that scrolls it showed as green lines on the neighbouring rows' edges.
+- Shared: `shared/shelfmark_tree_rows.py` (`SIZES` with `xl`, `DETAILS_KEY`, `details_shown`),
+  `shared/shelfmark_tree_details.py` (`sized_image_url`, `thumbnail_url(width=)`, `page_image_urls`).
+  Tests: `tests/test_shelfmark_tree_round5.py`, `tests/test_shelf_picker_desktop_round5.py`,
+  `tests/render_smoke/test_shelf_picker_round5_render_smoke.py`.
+
+### Search with the scholarly transcriptions: the first results show while it runs, and the list comes sooner (web + desktop)
+
+- **Early rows with the editions too.** A search of the automatic and the scholarly
+  transcriptions together -- the website's default -- showed nothing until it was finished, in
+  every text mode and in both apps. It now shows its first results while it runs, as a search
+  of the automatic transcriptions alone does. Both lists decide what comes first, so only
+  results no later row can move are shown (`shared/editions_preview.py`: each result's fused
+  score between two bounds; the pages the editions found are looked up in the main index out
+  of turn, their rows kept for their place): they are exactly the start of the finished list,
+  compared at every step on the real indexes in 29 searches. On the website the editions'
+  worker hands its rows to the main one (`shared/research_worker.py::write_editions_result`); the
+  desktop searches the editions first. Not for a search of the scholarly transcriptions alone,
+  and, as without the editions, not with a `-word` or an all-`*` query. Fuzzy waits for its
+  editions part, which is slow for a common word (GS-311).
+- **The list in less time.** Grouping the two lists passes over the rows that cannot be joined
+  with another (`editions_search._fold_clusters`) and pauses the garbage collector
+  (`shared/gc_pause.py`): 0.2-0.9 seconds instead of 1.3-4. A research worker saves results of
+  up to 256 MB uncompressed and exits as soon as they are saved: 1.3 seconds instead of 7.8 for
+  `#שלום`, and loading them is twice as fast. The desktop's results are handed to the window as
+  they are: `pyqtSignal(list)` copied every row and member, half of it on the window's thread.
+- Measured on the real indexes with the server's matching, before and after, interleaved
+  (seconds to the first rows / to the whole list; no first rows before):
+
+  | Search | Website before | Website after | Desktop before | Desktop after |
+  |---|---|---|---|---|
+  | Exact `שלום` | - / 9.6 | 2.6 / 5.3 | - / 9.6 | 1.2 / 5.4 |
+  | Variants `שלום` | - / 11.9 | 2.7 / 8.4 | - / 11.7 | 1.2 / 7.6 |
+  | Fuzzy `שלום` | - / 16.7 | 6.5 / 12.6 | - / 28.7 | 9.2 / 26.1 |
+  | Responsa `#שלום` | - / 17.2 | 3.6 / 13.8 | - / 30.5 | 2.4 / 19.5 |
+
+  The automatic transcriptions alone keep their first rows (0.8-1.2 on the website, 0.2-0.3 on
+  the desktop) and gain about 2-5 seconds on the whole list on the website.
+- Tests: `tests/test_editions_preview.py` (thousands of made-up searches at every step, the
+  engine on a small pair of indexes, the workers' files), and in
+  `tests/test_editions_parallel_jobs.py`, `tests/test_web_search_streaming.py`,
+  `tests/test_search_preview.py`. Closes GS-312.
+
+### Search: the API builds only the results it returns, also with the scholarly editions; Responsa shows its first results at once (web + desktop)
+
+- **API: only the returned results are built.** `POST /api/search` passes its `limit` to the
+  engine (`execute_search(max_rows=...)`, `shared/search_engine.py`): the engine builds the
+  first `limit` results and checks every other match only to count it; `total` is as before.
+  With the scholarly editions (the default where they are served) the search runs in one
+  research worker: the editions first, then only the transcription results that can be among
+  the first `limit` (`SearchEngine._first_grouped_rows`, `shared/editions_search.py::counterparts`).
+  Measured through the API with the server's matching: `#שלום` 12-16 seconds instead of
+  20-30, with variants and Judaeo-Arabic 20 instead of 23 or a 504 at the 30-second limit;
+  without the editions 10 instead of 18, and 13-15 instead of 22 or a 504. `#שלום [3] עולם` is
+  not faster (its time is checking the candidates, which counting needs as well), and with the
+  editions about 2 seconds slower (16-22 instead of 14-18): the editions are now searched
+  before the transcriptions instead of beside them. The other text modes gain on common words.
+- **Website and desktop: early rows in Responsa.** A Responsa search shows its first results
+  while it runs, as Exact does: after 1-1.5 seconds for `#שלום`, 2-3 for `#שלום [3] עולם`,
+  where nothing showed until the whole search ended (13-33 seconds on the server's matching).
+  Not with a `-word`, not for a query whose every word holds a star (ordered by its matches
+  once all are found), and -- as for every mode -- not when the scholarly editions are searched
+  too, which is the website's default where they are served (a tracker issue). The desktop
+  shows them when it searches the Genizah alone. The complete list, its count, sorting,
+  filters and export are as before.
+- **Faster rows everywhere.** Mapping a match back over the brackets of a transcription walks
+  the brackets, not the letters (`_unstripped_span`): it was a third of a common Responsa
+  search's time.
+- Tests: `tests/test_search_max_rows.py`, the first results with the editions in
+  `tests/test_editions_search.py`; the Responsa benchmarks in `tests/test_responsa_performance.py`
+  run again (local-data lane), timing the website's first rows and the API's answer, with and
+  without the editions. Closes the tracker issue filed as
+  `docs/open_issues.d/2026-11-24-responsa-common-word-searches-slow.md`.
+
+### Search API: a parallel found across a page break is its page (web)
+
+- `POST /api/parallels` gave a manuscript or codicological part found only in its text read
+  whole (a match across a page break, for one) with a `part:` / `sys:` uid that
+  `/api/browse` refused (400 `locator_conflict`), and a locator naming its first page. The
+  result is now the page its match starts on: that page's uid and locator
+  (`shared/search_engine.py::_note_composition_match_page`, `shared/search_serializer.py`).
+  Where the page cannot be told, `uid` is null and the locator is the first page. The web
+  page and the desktop are unchanged.
+
+### Desktop Reading Desk: a document's own edition, shown once (desktop)
+
+- A desk opened for a PGP document showed an edition under every fragment, the same text over and
+  over, and sometimes another document's: a desk of PGP 1702 showed edition 5171, which belongs to
+  PGP 1246, under all three fragments (GS-307). The desk asked for each fragment's sources, and
+  those are the sources of every document the fragment belongs to.
+- Now, while every fragment on the desk belongs to the document it was opened for, the text side
+  shows that document's own edition once, as the website has done since 10.1.0. A switch above it
+  moves between Edition, Translation and By fragment. With several editions, [Change version] or
+  the Version chooser picks one, and the Cite bar credits the one on show. By fragment opens each
+  fragment on a transcription of its own (its FGP edition, else the automatic one), with this
+  document's PGP sources still on offer and another document's never. The choices are kept with
+  the desk across a restart.
+- On the dark theme the desk's text side no longer draws light rows (the edition's attribution, the
+  fragments' names, the page breaks) with light text on them, and the line-number gutter is dark
+  beside dark text, in Browse as on the desk. In Hebrew, the count of the document's fragments on
+  the desk reads in its natural order, on the website too.
+- The rules are shared by both apps in `shared/reading_desk_document.py` (moved from
+  `web/pages/browse_desk_document.py`, which now draws the web's panel only). The desktop desk's
+  text side moved out of `genizah_app.py` into `desktop/reading_desk_text.py`. `genizah_app.py` is
+  125 lines shorter, and its ceilings in `tests/test_size_ratchet.py` are lowered to match. Tests are
+  in `tests/test_desktop_reading_desk_qt.py`.
+
+### Blau dictionary: the digital edition's credit names the project team (web)
+
+- The MiDRASH credit under Blau's dictionary now says the digital edition is courtesy of the
+  MiDRASH project (ERC, MiDRASH, 101071829) and names the project team at Bar-Ilan University
+  and the Eliyahu Lab, University of Haifa, in Hebrew and English.
+
 ## [11.1.0] - 2026-11-24 — Fixes and improvements
 
 ### Improvements

@@ -113,7 +113,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "11.0.0"
+WHATS_NEW_CONTENT_VERSION = "11.2.0"
 
 
 class WhatsNewBar(QFrame):
@@ -208,7 +208,9 @@ class WhatsNewBar(QFrame):
         # texts, 2026-11-18).
         # v11.0.0: Pick from the shelf, in the owner's own Hebrew (approved with the release
         # texts, 2026-11-22).
-        self.lbl_msg.setText(tr("New: Pick from the shelf - choose manuscripts by library and collection, preview them, and open one or several together. Press Ctrl+W to try it!"))
+        # v11.2.0: Quick look in Pick from the shelf (approved with the release texts,
+        # 2026-11-25).
+        self.lbl_msg.setText(tr("New: Quick look in Pick from the shelf - press Q on a shelfmark to see its image filling the window, and move along the shelf with the arrows. Press Ctrl+W to try it!"))
         self.show()
 
     def on_learn_more(self):
@@ -362,15 +364,14 @@ class WhatsNewDialog(QDialog):
         # browsing (the owner's own Hebrew), the table and thumbnails, the new Reading Desk, and
         # Katz and the Bodleian; no fixes (they are in the version history). 10.1.0's stay in
         # "All versions".
+        # v11.2.0 (2026-11-25, approved with the release texts; the search bullet is the
+        # owner's own Hebrew): three bullets, Quick look with its keys, the Details tab with
+        # the same keys, and faster search; the fixes are in the version history. 11.0.0's
+        # stay in "All versions".
         items = [
-            tr("Pick from the shelf (Ctrl+W, or the shelf button on Browse and in Go to): find a manuscript where it stands on its library's shelf — library, collection, volume, shelfmark."),
-            tr("Look before you open: beside the shelf, the shelfmark's image, title and the first pages of its text, its catalogue and bibliography entries, scholarly transcriptions, joins, and links to the library's own viewer. Signs on the shelfmarks mark PGP, scholarly transcriptions and joins."),
-            tr("Several at once: open them together in the Reading Desk, add them to a list or to the Fragment Puzzle, add several fragments to one join, or exclude them from a search."),
-            tr("Browse shows where the manuscript stands on the shelf, and Previous / Next manuscript follow the shelf."),
-            tr("Faster browsing from manuscript to manuscript: the program prepares the next manuscripts while you read, and keeps the ones you have already viewed."),
-            tr("In Pick from the shelf, see the shelfmarks as a list, a table (title, a line of the text, subject, pages, printed, PGP, edition) or thumbnails in three sizes."),
-            tr('A new Reading Desk: see the fragments one at a time, with a strip of thumbnails and the text of the fragment shown beside it; all the images together; or the join\'s puzzles ("Puzzle images"), each with Open in Puzzle, and New Puzzle to arrange another. Fragments can be moved up or down, and each image has its own adjustments.'),
-            tr("Also new: Katz Center images, and the Bodleian's links to each leaf, part and volume."),
+            tr("In Pick from the shelf, Quick look (Q, or the full-screen button under the image): a shelfmark's image filling the window. The arrows move from shelfmark to shelfmark along the shelf; Shift + the right / left arrow moves between the manuscript's images; + / - zoom in and out, R / Shift+R rotate; Space chooses, Enter opens, Esc goes back to the list."),
+            tr('In the Details tab of Pick from the shelf: the manuscript\'s other images, zoom and rotate, with the same keys (Shift + the right / left arrow, + / -, R / Shift+R), and one box to choose all of a join\'s partners. Hide the details to give the thumbnails room, and try the Extra large thumbnails.'),
+            tr("Faster search: in a search that includes the scholarly transcriptions and in Responsa-style search, the search runs faster and the first results appear as soon as they arrive."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

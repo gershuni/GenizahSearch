@@ -371,7 +371,7 @@ def test_an_unread_announcement_carries_a_dot():
 
 
 def test_the_dot_lights_again_only_where_the_new_entry_is_shown():
-    """11.0.0's entry is gated on the shelf tree being served, 10.1.0's on the catalogue text
+    """11.2.0's and 11.0.0's entries (one key) are gated on the shelf tree being served, 10.1.0's on the catalogue text
     search, 10.0.0's on the scholarly transcriptions being served to every reader, 9.16.0's on
     the letter-level index, and so is each key: a reader who dismissed the content before gets
     the dot where the new entry is there to read, and no dot where nothing new is shown."""
@@ -507,6 +507,26 @@ def test_the_shelf_line_is_shown_only_where_the_shelf_tree_is_served():
     served; in Hebrew it is the owner's sentence, not the English."""
     lines = {'en': "New: Pick from the shelf - choose manuscripts by library and collection",
              'he': "חדש: בחירה מהמדף - בחרו כתבי יד לפי ספריות ואוספים"}
+
+    def driver_for(lang):
+        async def driver(user):
+            await user.open('/')
+            seen.append(lines[lang] in _texts(_elements(user)))
+        return driver
+
+    seen = []
+    for served in (True, False):
+        with patch('web.main.shelf_tree_available', return_value=served):
+            _run(driver_for('en'))
+            _run(driver_for('he'), lang='he')
+    assert seen == [True, True, False, False], seen
+
+
+def test_the_quick_look_line_is_shown_only_where_the_shelf_tree_is_served():
+    """The 11.2.0 line (Quick look, in Pick from the shelf) is gated like the shelf line; in
+    Hebrew its last sentence is the owner's own."""
+    lines = {'en': "New: Quick look in Pick from the shelf - press Q on a shelfmark",
+             'he': "לחצו על W כדי לפתוח את הבחירה מהמדף!"}
 
     def driver_for(lang):
         async def driver(user):

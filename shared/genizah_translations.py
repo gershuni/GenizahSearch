@@ -6553,6 +6553,22 @@ TRANSLATIONS.update({
     "Comfortable rows": "שורות מרווחות",
 })
 
+# v11.2.0 web What's New entry and desktop What's New bar and dialog (2026-11-25), approved
+# with the release texts (the web line's last sentence and the search bullet are the owner's
+# own Hebrew).
+TRANSLATIONS.update({
+    "New: Quick look in Pick from the shelf - press Q on a shelfmark to see its image filling the window, and move along the shelf with the arrows. Press W to open Pick from the shelf!":
+        "חדש: מבט מהיר בבחירה מהמדף – הקישו Q על מספר מדף כדי לראות את התמונה שלו על כל החלון, ועברו לאורך המדף בעזרת החיצים. לחצו על W כדי לפתוח את הבחירה מהמדף!",
+    "New: Quick look in Pick from the shelf - press Q on a shelfmark to see its image filling the window, and move along the shelf with the arrows. Press Ctrl+W to try it!":
+        "חדש: מבט מהיר בבחירה מהמדף – הקישו Q על מספר מדף כדי לראות את התמונה שלו על כל החלון, ועברו לאורך המדף בעזרת החיצים. הקישו Ctrl+W כדי לנסות!",
+    "In Pick from the shelf, Quick look (Q, or the full-screen button under the image): a shelfmark's image filling the window. The arrows move from shelfmark to shelfmark along the shelf; Shift + the right / left arrow moves between the manuscript's images; + / - zoom in and out, R / Shift+R rotate; Space chooses, Enter opens, Esc goes back to the list.":
+        "בבחירה מהמדף, מבט מהיר (Q, או כפתור המסך המלא שמתחת לתמונה): התמונה של מספר המדף על כל החלון. החיצים עוברים ממספר מדף למספר מדף לאורך המדף; Shift עם חץ ימינה או שמאלה עובר בין התמונות של כתב היד; + / - מגדילים ומקטינים, R / Shift+R מסובבים; רווח בוחר, Enter פותח ו-Esc חוזר לרשימה.",
+    "In the Details tab of Pick from the shelf: the manuscript's other images, zoom and rotate, with the same keys (Shift + the right / left arrow, + / -, R / Shift+R), and one box to choose all of a join's partners. Hide the details to give the thumbnails room, and try the Extra large thumbnails.":
+        'בלשונית הפרטים בבחירה מהמדף: שאר התמונות של כתב היד, הגדלה וסיבוב, באותם מקשים (Shift עם חץ ימינה או שמאלה, + / -, R / Shift+R), ותיבה אחת לבחירת כל השותפים לצירוף. אפשר להסתיר את הפרטים כדי לפנות מקום לתמונות הממוזערות, ולנסות את הגודל "גדול מאוד".',
+    "Faster search: in a search that includes the scholarly transcriptions and in Responsa-style search, the search runs faster and the first results appear as soon as they arrive.":
+        'חיפוש מהיר יותר: גם בחיפוש הכולל את התעתיקים המדעיים וגם בחיפוש בסגנון פרויקט השו"ת, החיפוש מתבצע מהר יותר והתוצאות הראשונות מופיעות מיד כשהן מתקבלות.',
+})
+
 # v11.0.0 web What's New entry and desktop What's New bar and dialog (2026-11-22),
 # approved with the release texts (the web line, the bar and the faster-browsing bullet are
 # the owner's own Hebrew).

@@ -8,6 +8,89 @@ rules). Each release adds its entry here with its release texts.
 
 HISTORY = [
     {
+        "version": "11.2.0",
+        "date": "2026-11-25",
+        "apps": [
+            "web",
+            "desktop"
+        ],
+        "title": {
+            "en": "Quick look and faster search",
+            "he": "מבט מהיר וחיפוש מהיר יותר"
+        },
+        "items": [
+            {
+                "category": "feature",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Quick look in Pick from the shelf: press Q on a shelfmark, or the full-screen button under its image, to see its image filling the window. The arrows move to the next or previous shelfmark, on along the shelf; Space chooses it and Enter opens it.",
+                "he": "מבט מהיר בבחירה מהמדף: הקישו Q על מספר מדף, או לחצו על כפתור המסך המלא שמתחת לתמונה, כדי לראות את התמונה שלו על כל החלון. החיצים עוברים למספר המדף הבא או הקודם וממשיכים לאורך המדף; רווח בוחר בו ו-Enter פותח אותו."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Search results appear while the search is still running, also when it searches the scholarly transcriptions together with the automatic ones and in Responsa search, and the full list comes sooner.",
+                "he": "תוצאות החיפוש מופיעות עוד בזמן שהחיפוש רץ, גם כשמחפשים בתעתיקים המדעיים יחד עם האוטומטיים וגם בחיפוש שו\"ת, והרשימה המלאה מגיעה מהר יותר."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "In Pick from the shelf, the details can be hidden to give the thumbnails room, and there is an Extra large size. The details show the manuscript's other images, zoom and rotate, and one box chooses all of a join's partners.",
+                "he": "בבחירה מהמדף אפשר להסתיר את הפרטים כדי לפנות מקום לתמונות הממוזערות, ויש גודל חדש, \"גדול מאוד\". הפרטים מציגים את שאר התמונות של כתב היד, הגדלה וסיבוב, ותיבה אחת בוחרת את כל השותפים לצירוף."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "The keyboard in Pick from the shelf works the same in both apps, and each button shows its key when you point at it. On the website, W opens Pick from the shelf from any page.",
+                "he": "המקלדת בבחירה מהמדף פועלת באותו אופן באתר ובתוכנה, וכל כפתור מציג את המקש שלו כשמצביעים עליו. באתר, W פותח את הבחירה מהמדף מכל עמוד."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The Search API answers searches of common words faster.",
+                "he": "ממשק החיפוש (API) עונה מהר יותר על חיפוש של מילים נפוצות."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "In Pick from the shelf, the images of the National Library of Russia show in the desktop app too, and a microfilm's thumbnail is a page of the manuscript rather than its START frame.",
+                "he": "בבחירה מהמדף, התמונות של הספרייה הלאומית של רוסיה מוצגות גם בתוכנה, והתמונה הממוזערת של מיקרופילם היא עמוד מכתב היד ולא מסגרת ה-START שלו."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "The Reading Desk opened for a PGP document shows that document's own edition once, instead of an edition under every fragment, sometimes another document's.",
+                "he": "שולחן העיון שנפתח עבור מסמך PGP מציג את המהדורה של המסמך עצמו פעם אחת, במקום מהדורה מתחת לכל קטע, שלפעמים הייתה של מסמך אחר."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "In the Search API, a parallel found across a page break points to the page where it starts.",
+                "he": "בממשק החיפוש (API), מקבילה שנמצאה על פני מעבר עמוד מפנה לעמוד שבו היא מתחילה."
+            }
+        ]
+    },
+    {
         "version": "11.1.0",
         "date": "2026-11-24",
         "apps": [
