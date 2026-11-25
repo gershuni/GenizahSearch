@@ -99,8 +99,8 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
 - Version consistency: `version.py`, `CompileScriptGenizah.iss`, `version_info.txt`, `README.md` all match current version (not yet bumped)
 - **`tests/test_release_artifacts.py` `_TARGET_VERSION`** — `bump_version.py` does NOT update this constant. Check its current value matches the pre-bump version; you'll need to bump it manually in Phase 3.
 
-The development repository runs only the light CI check, plus the Qt lane on Linux for a PR
-labelled `gui-tests` (Phase 6); the full suite runs in the public repository after publishing
+The development repository runs only the light CI check, plus on Linux the Qt lane for a PR
+labelled `gui-tests` and the render-smoke lane for one labelled `render-smoke` (Phase 6); the full suite runs in the public repository after publishing
 (Phase 7). The local runs above cover what that CI cannot (the local-data lane) and what has
 failed there at release time before (render-smoke, the Qt lane), so do not skip them. A failure
 that only the full suite shows now first appears in the public CI: it is fixed as in "Fixing a
@@ -273,16 +273,19 @@ Ask: "Does this look right? Proceed with the release PR?"
    ```bash
    git push -u origin HEAD         # the release branch you are on (release/vX.Y.Z, or a -fixN branch)
    gh pr create --base master-main --title "release: vX.Y.Z — <theme>" --body-file <body file>
-   gh pr edit --add-label gui-tests  # the Qt lane on Linux, which no local run can show
+   gh pr edit --add-label gui-tests --add-label render-smoke  # the two Linux lanes
    ```
-   Before the owner merges, `gui-tests (labelled, ubuntu-latest)` must PASS on the PR's last commit,
-   from the Bash tool (PowerShell 5.1 mangles `--jq`):
+   Both labels, for every release (web-only, desktop-only or both: they share `shared/` and the Help
+   texts). Before the owner merges, `gui-tests (labelled, ubuntu-latest)` and
+   `render-smoke (labelled, ubuntu-latest)` must both PASS on the PR's last commit, from the Bash
+   tool (PowerShell 5.1 mangles `--jq`):
    ```bash
-   gh pr checks <PR number> --json name,bucket --jq '.[] | select(.name == "gui-tests (labelled, ubuntu-latest)") | .bucket'
+   gh pr checks <PR number> --json name,bucket --jq '.[] | select(.name | endswith("(labelled, ubuntu-latest)")) | .name + " " + .bucket'
    ```
-   It must print exactly `pass`. A bare `gh pr checks` does not fail on `skipping`, and a skipped
-   check is what a PR whose label was removed gets. This lane is where the public CI has failed at
-   release time; a failure here is fixed on this branch, before anything is merged or published.
+   It must print those two names, each with `pass`. A bare `gh pr checks` does not fail on
+   `skipping`, and a skipped check is what a PR without the label gets. These lanes are where the
+   public CI has failed at release time (v11.2.0: a render-smoke test nothing had run); a failure
+   here is fixed on this branch, before anything is merged or published.
 3. **The owner squash-merges it in the browser.** Note the merge commit's FULL id (40 characters)
    and wait until the development repository's light CI check on EXACTLY that commit has
    completed successfully (a run for another commit proves nothing):

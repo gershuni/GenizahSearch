@@ -28,9 +28,10 @@ concurrency:
 # Only lint-and-docs runs in the development repository: it is the check the
 # publishing step waits for. Every other job runs in the public repository, on
 # each published commit, and carries the same `if:` below. (The development
-# repository's one test lane, gui-tests on Linux for a PR labelled `gui-tests`,
-# is dev-gui-tests.yml: a workflow of its own, so that this one never runs for a
-# label and never leaves a skipped `tests` check behind.)
+# repository's two test lanes, on Linux, for a PR labelled `gui-tests` or
+# `render-smoke`, are dev-gui-tests.yml and dev-render-smoke.yml: workflows of
+# their own, so that this one never runs for a label and never leaves a skipped
+# `tests` check behind.)
 jobs:
   lint-and-docs:
     # Bounded so a hung runner fails in minutes instead of burning GitHub's
@@ -172,7 +173,10 @@ jobs:
       # Fresh process, only the render-smoke tests. They drive a NiceGUI User through
       # the app lifespan and are safe to run together (each restores slot_stack for
       # its siblings) but must NOT share a process with the broader suite.
-      - run: pytest tests/ -m render_smoke
+      # Their folder, not `tests/`: the same tests (conftest marks by folder, and
+      # tests/test_ci_workflows.py finds one marked outside it), without collecting
+      # the other 20,000 into this process.
+      - run: pytest tests/render_smoke -m render_smoke
 
   gui-tests:
     if: github.repository == 'gershuni/GenizahSearch'

@@ -252,6 +252,40 @@ def test_packaged_exe_self_test_imports():
     )
 
 
+def test_packaged_bundle_carries_no_bytecode_cache_of_this_checkout():
+    """Tier 2: no ``__pycache__`` ships. Two builds of one commit must not differ by what this
+    checkout imported in between (GenizahSearchPro.spec, ``_without_bytecode_caches``)."""
+    internal = _require_exe().parent / "_internal"
+    caches = sorted(str(p.relative_to(internal)) for p in internal.rglob("__pycache__"))
+    assert not caches, f"the bundle carries bytecode caches: {caches}"
+    # Not by dropping the folder they sat in: its data file and its sources still ship.
+    assert (internal / "shared" / "katz_images.csv").is_file()
+    assert (internal / "shared" / "export_utils.py").is_file()
+
+
+def test_spec_leaves_bytecode_caches_out_of_the_bundle():
+    """The spec's own filter, run on entries as PyInstaller writes them, and the place it is used:
+    after Analysis fills ``a.datas`` and before COLLECT copies it."""
+    import ast
+
+    source = (REPO_ROOT / "GenizahSearchPro.spec").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    [func] = [n for n in tree.body
+              if isinstance(n, ast.FunctionDef) and n.name == "_without_bytecode_caches"]
+    namespace = {}
+    exec(compile(ast.Module(body=[func], type_ignores=[]), "GenizahSearchPro.spec", "exec"), namespace)
+    keep = [("shared\\katz_images.csv", "src", "DATA"), ("shared/export_utils.py", "src", "DATA"),
+            ("docs\\my__pycache__notes.txt", "src", "DATA")]
+    drop = [("shared\\__pycache__\\fts.cpython-311.pyc", "src", "DATA"),
+            ("shared/__pycache__/fts.cpython-311.pyc", "src", "DATA"),
+            ("a\\b\\__pycache__\\c.pyc", "src", "DATA")]
+    assert namespace["_without_bytecode_caches"](keep + drop) == keep
+
+    analysis, filtered, collect = (
+        source.index(s) for s in ("a = Analysis(", "a.datas = _without_bytecode_caches(a.datas)", "coll = COLLECT("))
+    assert analysis < filtered < collect
+
+
 def test_packaged_bundle_carries_the_shelf_tree():
     """Tier 2: the bundle carries the shelf tree, and it is one the reader serves (shelf tree picker
     plan section 10.6: "Pick from the shelf" and the place on the shelf need it).

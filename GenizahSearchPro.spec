@@ -87,6 +87,19 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+
+def _without_bytecode_caches(toc):
+    # The datas entry 'shared' is copied whole, and with it the __pycache__ of whatever this
+    # checkout happened to import, tests included, so two builds of one commit could differ.
+    # The app does not need them: its modules come from the PYZ archive, and a shared module
+    # the archive does not hold is imported from its .py, which still ships.
+    # Entries are (destination, source, type).
+    return [entry for entry in toc
+            if '__pycache__' not in entry[0].replace('\\', '/').split('/')]
+
+
+a.datas = _without_bytecode_caches(a.datas)
 pyz = PYZ(a.pure)
 
 exe = EXE(

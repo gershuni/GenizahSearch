@@ -1,0 +1,46 @@
+name: dev render-smoke
+
+# As dev-gui-tests.yml: ci.yml's render-smoke-tests, on Linux, for a PR labelled
+# `render-smoke` (release PRs, changes to what a web page shows). v11.2.0's release
+# commit failed in the public CI on a render-smoke test that no development check had
+# run; with the label it fails on the PR instead. One run costs about 10 of the free
+# plan's monthly minutes, so the label is not for every PR.
+#
+# A workflow of its own for the reason given in dev-gui-tests.yml, and separate from
+# that one, so the two labels do not start each other's lane. In the public repository,
+# where ci.yml runs render-smoke-tests on both systems, this job always skips, under a
+# name no other check uses.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+# The newest run replaces one still running for the same PR.
+concurrency:
+  group: ${{ format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) }}
+  cancel-in-progress: ${{ github.run_attempt == 1 }}
+
+jobs:
+  render-smoke-labelled:
+    name: render-smoke (labelled, ubuntu-latest)
+    # On a labelled PR EVERY event runs the tests; the reason is in dev-gui-tests.yml.
+    if: >-
+      github.repository != 'gershuni/GenizahSearch'
+      && contains(github.event.pull_request.labels.*.name, 'render-smoke')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # The same steps as ci.yml's render-smoke-tests (tests/test_ci_workflows.py keeps them
+    # equal); the reasons for each are there.
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install Qt runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: pip install -r requirements-lock.txt
+      - run: pip install pytest
+      - run: pytest tests/render_smoke -m render_smoke

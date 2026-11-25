@@ -1,8 +1,8 @@
 name: dev GUI tests
 
-# The development repository runs only ci.yml's lint-and-docs. This adds its one
-# test lane: ci.yml's gui-tests, on Linux, for a PR labelled `gui-tests` (release
-# PRs, desktop work). Linux is where the Qt lane fails in ways a Windows machine
+# The development repository runs only ci.yml's lint-and-docs. This adds a test
+# lane (dev-render-smoke.yml is the other): ci.yml's gui-tests, on Linux, for a PR
+# labelled `gui-tests` (release PRs, desktop work). Linux is where the Qt lane fails in ways a Windows machine
 # cannot show; Windows is covered by the local `scripts/run_gui_tests.py`, which
 # runs headless as CI does. One run costs about 8 of the free plan's monthly
 # minutes, most of which lint-and-docs uses, so the label is not for every PR.

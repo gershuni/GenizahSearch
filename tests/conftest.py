@@ -203,6 +203,7 @@ def pytest_collection_modifyitems(config, items):
     # main `tests` CI job can deselect them (-m "not gui") and the dedicated
     # `gui-tests` job runs them in a fresh process (-m gui). Applied before the
     # scale early-return so the marker holds regardless of --run-scale.
+    outside_the_lane = []
     for item in items:
         if Path(str(item.fspath)).name in _GUI_TEST_FILES:
             item.add_marker(_pytest.mark.gui)
@@ -213,6 +214,8 @@ def pytest_collection_modifyitems(config, items):
         # a dedicated fresh-process job runs them (-m render_smoke).
         if "render_smoke" in Path(str(item.fspath)).parts:
             item.add_marker(_pytest.mark.render_smoke)
+        elif item.get_closest_marker("render_smoke") is not None:
+            outside_the_lane.append(item.nodeid)
         # Auto-apply `atlas_bake` to tests under tests/atlas_bake/ (Phase 133 ATLAS-01).
         # These require the pinned bake-time deps in requirements-atlas-bake.txt
         # (networkx/python-louvain/Brotli), NOT installed in the main `tests` job
@@ -228,6 +231,13 @@ def pytest_collection_modifyitems(config, items):
         _file, _sep, _test = item.nodeid.partition("::")
         if _needs_local_data(_file, _test):
             item.add_marker(_pytest.mark.needs_local_data)
+    # The render-smoke lane collects its folder alone, and every other lane deselects the
+    # marker, so a test carrying it elsewhere (by a decorator, a pytestmark, or a nested
+    # conftest, whose hook has already run) would run nowhere. Refused, not skipped.
+    if outside_the_lane:
+        raise _pytest.UsageError(
+            "marked render_smoke outside tests/render_smoke, so no CI lane runs it: "
+            + ", ".join(outside_the_lane))
     if config.getoption("--run-scale"):
         return  # run everything including scale tests
     skip_scale = _pytest.mark.skip(reason="scale test; use --run-scale to enable")
