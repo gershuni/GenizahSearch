@@ -148,3 +148,113 @@ def test_ordinary_events_are_unchanged():
         },
     }
     assert _run(event) == event
+
+
+def _run_js(body: str) -> dict:
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('node not installed')
+    script = 'var window = {};\n' + JS.read_text(encoding='utf-8') + '\n' + body
+    out = subprocess.run([node, '-e', script], capture_output=True, text=True,
+                         encoding='utf-8', check=True, timeout=30)
+    return json.loads(out.stdout)
+
+
+def test_the_recorder_event_leaves_posthog_own_config_alone():
+    """The recorder's first `$snapshot` holds `posthog.config` itself, not a copy of it.
+
+    The scrub once redacted `token` there in place: the page's project key became "[redacted]"
+    and every event after the recorder started was rejected, for eight days.
+    """
+    out = _run_js("""
+        var config = {token: 'phc_key', api_host: 'https://eu.i.posthog.com',
+                      before_send: window.__ghScrubEvent};
+        var sent = window.__ghScrubEvent({event: '$snapshot', properties: {
+            token: config.token,
+            $snapshot_data: [{type: 5, data: {tag: '$posthog_config', payload: {config: config}}}],
+        }});
+        var later = window.__ghScrubEvent({event: '$autocapture', properties: {token: config.token}});
+        process.stdout.write(JSON.stringify({
+            live: config.token,
+            recorded: sent.properties.$snapshot_data[0].data.payload.config.token,
+            sent: sent.properties.token,
+            later: later.properties.token,
+        }));
+    """)
+    assert out == {'live': 'phc_key', 'recorded': '[redacted]', 'sent': 'phc_key',
+                   'later': 'phc_key'}
+
+
+@pytest.mark.parametrize('name', ['$pageleave', 'hebrew_keyboard_used'])
+def test_the_event_it_was_given_is_never_written_to(name):
+    out = _run_js("""
+        var url = %s;
+        function freeze(o) { Object.values(o).forEach(function (v) {
+            if (v && typeof v === 'object') { freeze(v); } }); return Object.freeze(o); }
+        var event = freeze({event: %s, properties: {token: 'phc_key', $current_url: url,
+            deep: {access_token: 'a', list: [url]}}, $set: {u: url}, $set_once: {u: url},
+            timestamp: new Date(0)});
+        var before = JSON.stringify(event);
+        var sent = window.__ghScrubEvent(event);
+        process.stdout.write(JSON.stringify({same: before === JSON.stringify(event), sent: sent,
+            date: sent.timestamp instanceof Date}));
+    """ % (json.dumps(CONFIRM_URL), json.dumps(name)))
+    assert out['same'] and out['date']
+    assert ACCESS not in json.dumps(out['sent'])
+    assert out['sent']['properties']['deep']['access_token'] == '[redacted]'
+    assert out['sent']['properties']['token'] == 'phc_key'
+
+
+def test_values_json_writes_its_own_way_are_kept_and_scrubbed():
+    out = _run_js("""
+        var when = new Date(0);
+        var sent = window.__ghScrubEvent({event: 'x', properties: {
+            when: when, page: new URL(%s), shared: [when, when]}});
+        process.stdout.write(JSON.stringify(sent.properties));
+    """ % json.dumps(CONFIRM_URL))
+    assert out['when'] == '1970-01-01T00:00:00.000Z'
+    assert out['shared'] == [out['when'], out['when']]
+    assert ACCESS not in out['page'] and '[redacted]' in out['page']
+
+
+def test_a_copied_event_serializes_as_the_original_would():
+    """Same JSON as the event itself when there is nothing to redact: a toJSON gets its key (and
+    is asked again under another one), boxed primitives are their values, a shared object stays."""
+    out = _run_js("""
+        var byKey = {toJSON: function (key) { return 'key ' + key; }};
+        var self = {a: 1, toJSON: function () { return this; }};
+        var shared = {x: 1};
+        var event = {event: 'x', properties: {
+            one: byKey, two: byKey, list: [byKey, byKey], self: self, again: self,
+            number: new Number(7), no: new Boolean(false), text: new String('x'),
+            boxes: [new Number(0)], shared: shared, twice: [shared, shared],
+            gone: {toJSON: function () { return undefined; }}, none: null}};
+        var plain = JSON.stringify(event);
+        process.stdout.write(JSON.stringify({plain: JSON.parse(plain),
+            sent: JSON.parse(JSON.stringify(window.__ghScrubEvent(event)))}));
+    """)
+    assert out['sent'] == out['plain']
+    assert out['sent']['properties']['one'] == 'key one'
+    assert out['sent']['properties']['number'] == 7
+
+
+def test_a_token_in_a_boxed_string_or_a_to_json_value_is_redacted():
+    out = _run_js("""
+        var url = %s;
+        process.stdout.write(JSON.stringify(window.__ghScrubEvent({event: 'x', properties: {
+            boxed: new String(url), own: {toJSON: function () { return {u: url}; }}}})));
+    """ % json.dumps(CONFIRM_URL))
+    assert ACCESS not in json.dumps(out) and REFRESH not in json.dumps(out)
+
+
+def test_a_to_json_runs_once_and_is_not_on_the_copy():
+    """A toJSON that returns `this` would otherwise run again when PostHog serializes the copy,
+    and what it adds then has passed no scrub."""
+    out = _run_js("""
+        var url = %s, calls = 0;
+        var value = {toJSON: function () { calls += 1;
+            if (calls > 1) { return {late: url}; } return this; }, a: 1};
+        var text = JSON.stringify(window.__ghScrubEvent({event: 'x', properties: {v: value}}));
+        process.stdout.write(JSON.stringify({calls: calls, sent: JSON.parse(text)}));
+    """ % json.dumps(CONFIRM_URL))
+    assert out == {'calls': 1, 'sent': {'event': 'x', 'properties': {'v': {'a': 1}}}}
