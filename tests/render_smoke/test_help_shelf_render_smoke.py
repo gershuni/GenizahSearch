@@ -23,8 +23,9 @@ from nicegui.ui_run import set_storage_secret
 from tests.render_smoke._bounded_run import run_bounded
 
 _TITLES = {'en': 'Pick from the shelf', 'he': 'בחירה מהמדף'}
-_LIST_LINE = {'en': 'its image, its title and its other shelfmarks',
-              'he': 'התמונה, הכותרת ומספרי המדף הנוספים'}
+# How the list's first line starts, up to its first bold word (the HTML has a tag there).
+_LIST_LINE = {'en': 'its image, with ',
+              'he': 'התמונה, עם '}
 
 
 @asynccontextmanager
