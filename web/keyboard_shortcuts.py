@@ -77,7 +77,8 @@ def sections(rtl: bool, dictionaries: bool) -> list[tuple[str, list[tuple[tuple[
             (('Esc',), 'Close the dictionary'),
         ]
     return [
-        (EVERY_PAGE, [(('?',), 'Show this list'), (('/',), 'Jump to the search box')]),
+        (EVERY_PAGE, [(('?',), 'Show this list'), (('/',), 'Jump to the search box'),
+                      (('W',), 'Pick from the shelf')]),
         ('Browse by Shelfmark', browse),
         ('Search', [(('Enter',), 'Run the search'),
                     (('Space',), 'Scroll the results down'),

@@ -1878,7 +1878,7 @@ def create_joins_lab_page(
                 _re_render_candidates_surface()
 
             card_size_toggle = ui.toggle(
-                {'s': tr('Small'), 'm': tr('Medium'), 'l': tr('Large')},
+                {'s': tr('Small'), 'm': tr('Medium'), 'l': tr('Large'), 'xl': tr('Extra large')},
                 value=_card_size['value'],
             ).props('dense no-caps').mark('joins-card-size').tooltip(tr('Card size'))
             card_size_toggle.set_visibility(_view_mode['value'] == 'grid')

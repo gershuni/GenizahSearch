@@ -1204,10 +1204,10 @@ class TestSeed010BreakerAwareThumbnail:
 
 def test_card_sizes_keep_medium_as_the_grid_was():
     from web.components.candidate_grid import CARD_SIZES, normalize_card_size
-    assert normalize_card_size(None) == 'm' and normalize_card_size('xl') == 'm'
+    assert normalize_card_size(None) == 'm' and normalize_card_size('xxl') == 'm' and normalize_card_size('xl') == 'xl'
     assert normalize_card_size(['l']) == 'm'   # a mangled stored value, not a crash
     assert CARD_SIZES['m'] == ("grid-cols-1 sm:grid-cols-2 lg:grid-cols-3", 160, 300)
-    assert CARD_SIZES['l'][1] > CARD_SIZES['m'][1] > CARD_SIZES['s'][1]
+    assert CARD_SIZES['xl'][1] > CARD_SIZES['l'][1] > CARD_SIZES['m'][1] > CARD_SIZES['s'][1]
 
 
 def test_thumbnail_width_is_the_callers():

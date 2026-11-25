@@ -45,14 +45,22 @@ logger = logging.getLogger(__name__)
 
 #: The pane's views, in the order the switch shows them.
 VIEWS = ('list', 'table', 'gallery')
-#: The thumbnails' sizes, the Joins Lab's keys (small, medium, large).
-SIZES = ('s', 'm', 'l')
+#: The thumbnails' sizes, the Joins Lab's keys (small, medium, large, extra large).
+SIZES = ('s', 'm', 'l', 'xl')
 DEFAULT_VIEW, DEFAULT_SIZE = 'list', 'm'
 #: What each view and size is called (English; each app translates).
 VIEW_LABELS = {'list': 'List', 'table': 'Table', 'gallery': 'Thumbnails'}
-SIZE_LABELS = {'s': 'Small', 'm': 'Medium', 'l': 'Large'}
+SIZE_LABELS = {'s': 'Small', 'm': 'Medium', 'l': 'Large', 'xl': 'Extra large'}
 #: Where the choice is kept: the web's per-reader storage key, the desktop's app-config key.
 STORAGE_KEY = 'shelf_picker_view'
+#: Whether the details pane is shown (the reader may hide it, to give the shelfmarks its room), kept
+#: under the same two stores; shown when nothing is kept.
+DETAILS_KEY = 'shelf_picker_details'
+
+
+def details_shown(value) -> bool:
+    """A kept details-pane choice: hidden only when ``False`` was kept (anything else: shown)."""
+    return value is not False
 
 #: The table's columns, in order: each one's key and its header (English, the desktop search results
 #: table's word; Pages is the picker's own: neither results view counts pages).

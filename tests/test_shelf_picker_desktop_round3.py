@@ -386,7 +386,7 @@ def _field(pane, key):
 def test_the_pane_shows_the_shelfmark_clicked_last_and_its_image(svc, monkeypatch):
     images = {}
 
-    def thumb(sid, _meta):
+    def thumb(sid, _meta, *_w):
         # the first one clicked has an image, slowly; the second none: its pane must not show the first's
         if sid != SYS["as2"][1]:
             images[sid] = None

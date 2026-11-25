@@ -3,6 +3,9 @@
  *   ?  opens the card that lists the shortcuts: the script dispatches
  *      `gs-shortcuts` on the page's hidden `.gs-shortcuts-trigger`, and the
  *      page draws the card (one round trip; the card is translated there).
+ *   W  opens Pick from the shelf (the desktop's Ctrl+W, which a browser keeps for closing its
+ *      tab): Browse's own button where it is, which opens at the manuscript shown, else the
+ *      header's. By the key, so a Hebrew layout (which types ' there) works the same.
  *   /  moves the focus to the page's own search box, the one marked
  *      `data-gs-primary-search` (/search, the homepage), else to the header's
  *      go-to box, opening it first where it sits behind its button (a bar
@@ -70,6 +73,16 @@
       if (!trigger) return;
       event.preventDefault();
       trigger.dispatchEvent(new CustomEvent(EVENT));
+      return;
+    }
+    if (!event.shiftKey && event.code === 'KeyW') {
+      var shelf = ['[data-testid="shelf-picker-open"]', '[data-testid="header-shelf-pick"]']
+        .map(function (sel) { return document.querySelector(sel); })
+        .filter(function (el) { return visible(el); })[0];
+      if (shelf) {
+        event.preventDefault();
+        shelf.click();
+      }
       return;
     }
     if (!event.shiftKey && (event.key === '/' || event.code === 'Slash')) {

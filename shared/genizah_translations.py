@@ -4601,6 +4601,7 @@ TRANSLATIONS.update({
     "Small":                           "קטן",
     "Medium":                          "בינוני",
     "Large":                           "גדול",
+    "Extra large":                     "גדול מאוד",
     "Thumbnail size":                  "גודל התמונות הממוזערות",
     "Larger or smaller original":      "הגדלה או הקטנה של המקור",
     "Card size":                       "גודל הכרטיסים",
@@ -7025,4 +7026,14 @@ TRANSLATIONS.update({
 TRANSLATIONS.update({
     "All pages": "כל העמודים",
     "One page": "עמוד אחד",
+})
+# The shelf picker, round 5 (2026-11-25): the details pane hidden or shown, its joins all at once,
+# its pages, and the extra large thumbnails (both apps)
+TRANSLATIONS.update({
+    "Show or hide the details pane": "הצגה או הסתרה של חלונית הפרטים",
+    "Choose all the joins": "בחר את כל הצירופים",
+    "Untick all the joins": "בטל את סימון כל הצירופים",
+    "Image {n} of {total}": "תמונה {n} מתוך {total}",
+    "Previous image": "תמונה קודמת",
+    "Next image": "תמונה הבאה",
 })

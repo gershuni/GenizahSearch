@@ -18,8 +18,8 @@ What only the community database knows -- the joins readers made and their comme
 reads with its own client, off the UI thread, and adds: ``add_joins`` (one partner once, its
 sources named) and ``details['comments']``.
 
-``thumbnail_url`` is apart: finding a manuscript's first image may ask NLI for its image ids, so a
-picker shows the text first and the image when it comes.
+``thumbnail_url`` and ``page_image_urls`` are apart: finding a manuscript's images may ask NLI for
+its image ids, so a picker shows the text first and the image when it comes.
 
 Pure: no Qt, no NiceGUI.
 """
@@ -306,13 +306,56 @@ def field_lines(details: dict, tr: Callable[[str], str]) -> list:
     return out
 
 
-def thumbnail_url(sys_id: str, meta_mgr: Any) -> str:
-    """The manuscript's first image, small, from NLI's image server ('' when it has none or the
-    lookup fails). May ask NLI: call it off the UI thread, after the text is shown."""
+#: The width NLI's thumbnail address asks for (``MetadataManager._resolve_thumbnail``).
+_NLI_THUMB_SIZE = '/full/400,/'
+
+
+def sized_image_url(url: str, width: int) -> str:
+    """An NLI image address (``.../full/400,/0/default.jpg``) asking for ``width`` pixels instead; any
+    other address as it is."""
+    if url and width and _NLI_THUMB_SIZE in url:
+        return url.replace(_NLI_THUMB_SIZE, f'/full/{int(width)},/', 1)
+    return url
+
+
+def thumbnail_url(sys_id: str, meta_mgr: Any, width: int = 400) -> str:
+    """The manuscript's first image, ``width`` pixels wide, from NLI's image server ('' when it has
+    none or the lookup fails). May ask NLI: call it off the UI thread, after the text is shown."""
     if not sys_id or meta_mgr is None:
         return ''
     try:
-        return meta_mgr.get_thumbnail(sys_id, size=320) or ''
+        return sized_image_url(meta_mgr.get_thumbnail(sys_id, size=320) or '', width)
     except Exception as exc:   # noqa: BLE001 -- no image, never a crash
         logger.debug("shelf details: no thumbnail for %s: %s", sys_id, exc)
         return ''
+
+
+def page_image_urls(sys_id: str, meta_mgr: Any, width: int = 400) -> list:
+    """Every image of the manuscript, in its order, ``width`` pixels wide, from NLI's image server (the
+    list Browse shows: ``MetadataManager.fetch_volume_manifest``); [] when it has none or the lookup
+    fails. Asks NLI for the manifest when it is not kept: call it off the UI thread."""
+    if not sys_id or meta_mgr is None:
+        return []
+    try:
+        images = (meta_mgr.fetch_volume_manifest(sys_id, 1) or {}).get('images_nli') or []
+    except Exception as exc:   # noqa: BLE001 -- the first image alone, never a crash
+        logger.debug("shelf details: no image list for %s: %s", sys_id, exc)
+        return []
+    return [f"{image['url']}/full/{int(width)},/0/default.jpg" for image in images
+            if isinstance(image, dict) and image.get('url')]
+
+
+_FL_ID = re.compile(r'/FL(\d+)(?:/|$)')
+
+
+def image_index(urls: list, url: str) -> Optional[int]:
+    """Which of ``urls`` (a manuscript's images, NLI's addresses) is the image of ``url``, by NLI's image id
+    (``FL...``), whatever width either asks for; None when none is."""
+    found = _FL_ID.search(url or '')
+    if not found:
+        return None
+    for i, other in enumerate(urls):
+        hit = _FL_ID.search(other or '')
+        if hit and hit.group(1) == found.group(1):
+            return i
+    return None

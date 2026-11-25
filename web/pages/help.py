@@ -886,11 +886,14 @@ also finds the volumes and shelfmarks inside it: type `2556.4` in ENA. The bread
 back to any level. On a phone the shelf shows one level at a time.
 
 **Look before you open:** a click on a shelfmark chooses it and shows its details beside the shelf:
-- its image, its title and its other shelfmarks;
+- its image, with **previous** and **next** through its other images when it has more than one, and
+  **+** / **-** (or the mouse wheel over it) to zoom in and out: drag to move around, double-click to
+  fit it again; its title and its other shelfmarks;
 - the first pages of its text, as they are stored;
 - how many pages it has and how many have text; its catalogue and bibliography entries; its
   scholarly transcriptions; readers' comments;
 - its joins: a join's shelfmark takes you to it on the shelf, and its box adds it to your choice;
+  the box before **Joins** chooses every join on the shelf at once (pressed again, none);
 - links to Ktiv, the library's own viewer (such as the Cambridge Digital Library or Manchester) and
   PGP.
 
@@ -902,10 +905,11 @@ knows, a mark for a scholarly transcription, and a link mark for joins. Hold the
 shelfmark to see its title.
 
 **Views:** the switch above the shelfmarks shows them as a **list**, a **table** (title, a line of
-the text, subject, pages, printed, PGP, edition) or **thumbnails** (small, medium or large). In the
-table and the thumbnails the shelfmarks take most of the window, beside the last column of
-collections or volumes. Choosing, ticking and opening work the same in every view, and the view is
-kept for next time.
+the text, subject, pages, printed, PGP, edition) or **thumbnails** (small, medium, large or extra
+large). In the table and the thumbnails the shelfmarks take most of the window, beside the last
+column of collections or volumes. Choosing, ticking and opening work the same in every view, and the
+view is kept for next time. The **details** button in the header hides the details beside the shelf,
+for more room, and shows them again.
 
 **Several at once:** turn on **Open more than one** (on Browse, the header and the home page) and
 tick shelfmarks, or take a whole volume with **Select all in ...**. A bar shows what is chosen;
@@ -914,6 +918,18 @@ Puzzle, a list's **Add from the shelf** and a new join, ticked shelfmarks are ad
 place has its limit (the Reading Desk: 30 manuscripts and 1,000 pages; the Fragment Puzzle: 30; a
 join: 30 fragments; a list: 2,000 at a time), and a tick past it is refused with the reason. What
 you tick is kept until you use it or clear it, and can be saved as a list.
+
+**The keyboard:** **Tab** and **Shift+Tab** go from list to list (Tab in a filter goes into its list;
+**F6** leaves the lists for the buttons and the details, and comes back); in a list the arrows, **Home** / **End** and **Page Up** / **Page Down** move. In a column the arrow forward
+opens the row and goes into its list, the arrow back goes to the list before (in Hebrew the arrows are
+mirrored). **Space** chooses a shelfmark (with several at once: ticks it), **Enter** opens it; moving onto a
+shelfmark with the arrows chooses it too. From a
+list: **Ctrl** with an arrow is the previous or next image in the details, **+** / **-** / **0** zoom
+it, **1** / **2** / **3** show the shelfmarks as a list, a table or thumbnails and **[** / **]** make the
+thumbnails smaller or larger, **S** turns **Open more than one** on or off. With several at once,
+**Space** ticks and **Enter** opens what is ticked. **Ctrl+F** goes to the list's filter and **Esc**
+back to the list; **Alt+D** hides or shows the details. **W**, on any page (outside a box you type in),
+opens Pick from the shelf. Under the image, the arrows beside the zoom turn it a quarter.
 
 **Exclude from the shelf:** in Search, **Exclude known manuscripts** > **Pick from the shelf** ticks
 whole volumes, collections or single shelfmarks, with no limit, and excludes them all.
@@ -934,10 +950,12 @@ manuscript** follow the shelf, across volumes and collections.
 הקלידו `2556.4` ב-ENA. שורת הניווט שמעל העמודות מחזירה לכל רמה. בטלפון המדף מוצג רמה אחר רמה.
 
 **הצצה לפני פתיחה:** לחיצה על מספר מדף בוחרת בו ומציגה את פרטיו לצד המדף:
-- התמונה, הכותרת ומספרי המדף הנוספים;
+- התמונה, עם **הקודמת** ו**הבאה** בין שאר התמונות כשיש יותר מאחת, ועם **+** / **-** (או גלגלת העכבר
+  מעליה) להגדלה ולהקטנה: גררו כדי לזוז בה, ולחיצה כפולה מחזירה אותה לגודלה; הכותרת ומספרי המדף הנוספים;
 - תחילת הטקסט, כפי שהוא שמור;
 - כמה עמודים יש בו וכמה מהם עם טקסט; רשומות הקטלוג והביבליוגרפיה; תעתיקים מדעיים; הערות קוראים;
 - הצירופים: לחיצה על מספר המדף של צירוף מעבירה אליו על המדף, והתיבה שלו מוסיפה אותו לבחירה;
+  התיבה שלפני **צירופים** בוחרת בבת אחת את כל הצירופים שעל המדף (לחיצה נוספת: אף אחד מהם);
 - קישורים לכתיב, לאתר הספרייה (כמו הספרייה הדיגיטלית של קיימברידג' או מנצ'סטר) ול-PGP.
 
 **פתיחה ועוד:** **פתח** פותח את מספר המדף שנבחר. **הוסף לרשימה** ו**הוסף לפאזל** נמצאים לידו במקומות
@@ -947,9 +965,10 @@ manuscript** follow the shelf, across volumes and collections.
 מדעי וסימן קישור לצירופים. העמידו את הסמן על מספר מדף כדי לראות את כותרתו.
 
 **תצוגות:** המתג שמעל מספרי המדף מציג אותם **כרשימה**, **כטבלה** (כותרת, שורה מהטקסט, נושא, עמודים,
-דפוס, PGP, מהדורה) או **בתמונות ממוזערות** (קטנות, בינוניות או גדולות). בטבלה ובתמונות הממוזערות מספרי
-המדף תופסים את רוב החלון, לצד העמודה האחרונה של האוספים או הכרכים. בחירה, סימון ופתיחה פועלים אותו
-דבר בכל תצוגה, והתצוגה נשמרת לפעם הבאה.
+דפוס, PGP, מהדורה) או **בתמונות ממוזערות** (קטנות, בינוניות, גדולות או גדולות מאוד). בטבלה ובתמונות
+הממוזערות מספרי המדף תופסים את רוב החלון, לצד העמודה האחרונה של האוספים או הכרכים. בחירה, סימון ופתיחה
+פועלים אותו דבר בכל תצוגה, והתצוגה נשמרת לפעם הבאה. כפתור **הפרטים** שבכותרת מסתיר את הפרטים שלצד
+המדף, כדי לפנות מקום, ומציג אותם שוב.
 
 **כמה בבת אחת:** הפעילו את **פתיחת כמה כתבי יד** (בעיון לפי מספר מדף, בכותרת ובדף הבית) וסמנו מספרי
 מדף, או כרך שלם ב**בחירת הכל ב־...**. פס מראה את מה שנבחר; **פתח** פותח אותם זה לצד זה בשולחן
@@ -957,6 +976,17 @@ manuscript** follow the shelf, across volumes and collections.
 אליהם. לכל מקום יש גבול (שולחן העיון: 30 כתבי יד ו-1,000 עמודים; פאזל הקטעים: 30; צירוף: 30
 קטעים; רשימה: 2,000 בכל פעם), וסימון שעובר אותו לא מתקבל, עם הסבר. מה שסימנתם נשמר עד שתשתמשו בו או
 תנקו אותו, ואפשר לשמור אותו כרשימה.
+
+**המקלדת:** **Tab** ו-**Shift+Tab** עוברים מרשימה לרשימה (Tab בתיבת סינון עובר לרשימה שלה; **F6**
+יוצא מהרשימות אל הכפתורים והפרטים, וחוזר); ברשימה זזים בחצים,
+ב-**Home** / **End** וב-**Page Up** / **Page Down**. בעמודה, החץ קדימה פותח את השורה ועובר לרשימה שלה,
+והחץ אחורה חוזר לרשימה הקודמת (בעברית החצים הפוכים). **רווח** בוחר מספר מדף (בבחירת כמה: מסמן אותו),
+ו-**Enter** פותח אותו; גם מעבר בחצים אל מספר מדף בוחר בו. מתוך רשימה: **Ctrl** עם חץ עובר לתמונה הקודמת או הבאה בפרטים, **+** / **-** / **0**
+מגדילים, מקטינים ומחזירים אותה לגודלה, **1** / **2** / **3** מציגים את מספרי המדף כרשימה, כטבלה או
+כתמונות ממוזערות, ו-**[** / **]** מקטינים או מגדילים את התמונות הממוזערות. **Ctrl+F** עובר לסינון של
+הרשימה ו-**Esc** חוזר לרשימה; **Alt+D** מסתיר או מציג את הפרטים; **S** מפעיל או מכבה את **פתיחת כמה
+כתבי יד**. בבחירת כמה, **רווח** מסמן ו-**Enter** פותח את המסומנים. **W**, בכל עמוד (מחוץ לתיבת הקלדה),
+פותח את הבחירה מהמדף. מתחת לתמונה, החצים שליד ההגדלה מסובבים אותה ברבע.
 
 **החרגה מהמדף:** בחיפוש, **החרג כתבי יד מוכרים** > **בחירה מהמדף** מסמן כרכים, אוספים או מספרי מדף
 בודדים, בלי גבול, ומחריג את כולם.

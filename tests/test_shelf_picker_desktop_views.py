@@ -202,7 +202,7 @@ def test_only_the_tiles_in_sight_are_fetched_three_at_a_time(svc, monkeypatch, _
     state = {'now': 0, 'most': 0, 'asked': [], 'threads': set()}
     lock = threading.Lock()
 
-    def fetch(sid, _meta):
+    def fetch(sid, _meta, *_w):
         with lock:
             state['now'] += 1
             state['most'] = max(state['most'], state['now'])
@@ -242,7 +242,7 @@ def test_closing_waits_for_no_thumbnail_and_none_comes_after(svc, monkeypatch, _
     release = threading.Event()
     delivered = []
 
-    def slow(sid, _meta):
+    def slow(sid, _meta, *_w):
         release.wait(5)
         return QImage(10, 10, QImage.Format.Format_RGB32)
     monkeypatch.setattr(picker, '_thumbnail_image', slow)
@@ -268,7 +268,7 @@ def test_a_200_that_is_no_image_is_no_success_for_the_breaker(monkeypatch):
     monkeypatch.setattr(breaker, 'is_open', lambda: False)
     monkeypatch.setattr(breaker, 'record_success', lambda **kw: seen.append('success'))
     monkeypatch.setattr(breaker, 'record_failure', lambda **kw: seen.append('failure'))
-    monkeypatch.setattr(picker, 'thumbnail_url', lambda sid, meta: 'https://iiif.nli.org.il/x/full/320,/0/default.jpg')
+    monkeypatch.setattr(picker, 'thumbnail_url', lambda sid, meta, **_w: 'https://iiif.nli.org.il/x/full/320,/0/default.jpg')
     monkeypatch.setattr(fetch, 'is_nli_host', lambda url: True)
 
     class _Resp:
@@ -290,7 +290,7 @@ def _point(view, item):
 
 def test_a_click_on_any_cell_chooses_and_the_button_double_click_and_enter_take(svc, monkeypatch):
     monkeypatch.setattr(picker, 'row_details', _fake_rows)
-    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta: None)
+    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta, *_w: None)
     target = SYS["as2"][2]
     for view in ('table', 'gallery'):
         dialog = _open(svc, act_label="Open")
@@ -342,7 +342,7 @@ def test_a_click_on_any_cell_chooses_and_the_button_double_click_and_enter_take(
 
 def test_ticks_in_the_table_and_the_thumbnails(svc, monkeypatch):
     monkeypatch.setattr(picker, 'row_details', _fake_rows)
-    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta: None)
+    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta, *_w: None)
     taken = []
     store = picker.SelectionStore()
     a, b = SYS["as2"][1], SYS["as2"][3]
@@ -401,8 +401,8 @@ def test_every_page_of_rows_is_read_one_job_at_a_time(svc, monkeypatch):
 def test_a_stopped_pool_delivers_nothing(monkeypatch):
     release = threading.Event()
     got = []
-    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta: (release.wait(5), QImage(4, 4, QImage.Format.Format_RGB32))[1])
-    pool = picker._ThumbPool(lambda sid, image: got.append(sid))
+    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta, *_w: (release.wait(5), QImage(4, 4, QImage.Format.Format_RGB32))[1])
+    pool = picker._ThumbPool(lambda sid, image, *_w: got.append(sid))
     pool.want(['a', 'b', 'c', 'd', 'e'])
     assert pool.running() == {'a', 'b', 'c'}                   # three at a time
     pool.stop()
@@ -416,7 +416,7 @@ def test_a_stopped_pool_delivers_nothing(monkeypatch):
 def test_a_tile_shows_the_start_of_its_title(svc, monkeypatch, _isolated_profile):
     """Owner, 2026-11-22: the start of the title under the shelfmark, readable at a glance."""
     _isolated_profile[STORAGE_KEY] = {'view': 'gallery', 'size': 'm'}
-    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta: None)
+    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta, *_w: None)
     monkeypatch.setattr(picker, 'title_of', lambda sid: f'מכתב ממשה אל אחיו על ענייני מסחר {sid}')
     dialog = _open(svc)
     try:
@@ -446,7 +446,7 @@ def test_leaving_the_gallery_drops_the_thumbnails_waiting(svc, monkeypatch, _iso
     release = threading.Event()
     asked = []
 
-    def slow(sid, _meta):
+    def slow(sid, _meta, *_w):
         asked.append(sid)
         release.wait(5)
         return None
@@ -468,7 +468,7 @@ def test_leaving_the_gallery_drops_the_thumbnails_waiting(svc, monkeypatch, _iso
 
 def test_the_chosen_tile_stays_chosen_across_a_size_change(svc, monkeypatch, _isolated_profile):
     _isolated_profile[STORAGE_KEY] = {'view': 'gallery', 'size': 'm'}
-    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta: None)
+    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta, *_w: None)
     target = SYS["as2"][3]
     dialog = _open(svc, start="vol:100")
     try:
@@ -513,7 +513,7 @@ def test_the_row_chosen_in_the_list_is_the_tables_current_one(svc, monkeypatch):
 def test_a_size_change_keeps_the_readers_place(svc, monkeypatch, _isolated_profile):
     """Codex on #95: scrolled down, a new size keeps the tile at the top at the top (not the gallery's top)."""
     _isolated_profile[STORAGE_KEY] = {'view': 'gallery', 'size': 'l'}
-    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta: None)
+    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta, *_w: None)
     dialog = _open(svc, height=520)
     try:
         panel = dialog.leaf_panel
@@ -538,7 +538,7 @@ def test_switching_views_keeps_the_readers_place(svc, monkeypatch, _isolated_pro
     """Codex on #95: scrolled down in the thumbnails, a switch to the table and back keeps the shelfmark
     that was at the top in sight (the table's offset no longer overwrites the gallery's)."""
     _isolated_profile[STORAGE_KEY] = {'view': 'gallery', 'size': 'l'}
-    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta: None)
+    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta, *_w: None)
     monkeypatch.setattr(picker, 'row_details', _fake_rows)
     dialog = _open(svc, height=520)
     try:
@@ -685,7 +685,7 @@ def test_new_tiles_drop_the_thumbnails_waiting_for_the_old(svc, monkeypatch, _is
     release = threading.Event()
     asked = []
 
-    def slow(sid, _meta):
+    def slow(sid, _meta, *_w):
         asked.append(sid)
         release.wait(5)
         return None
@@ -725,7 +725,7 @@ def _image():
 def test_the_pane_fetches_a_thumbnail_once_and_shows_it_at_once_after(svc, monkeypatch, _fresh_caches):
     monkeypatch.setattr(picker, 'catalogue', object())
     asked = []
-    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta: asked.append(sid) or _image())
+    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta, *_w: asked.append(sid) or _image())
     here = SYS["as2"][3]
     dialog = _open(svc, start=here)
     try:
@@ -750,7 +750,7 @@ def test_a_thumbnail_the_gallery_fetched_is_the_panes_at_once(svc, monkeypatch, 
     _isolated_profile[STORAGE_KEY] = {'view': 'gallery', 'size': 'm'}
     monkeypatch.setattr(picker, 'catalogue', object())
     asked = []
-    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta: asked.append(sid) or _image())
+    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta, *_w: asked.append(sid) or _image())
     dialog = _open(svc)
     try:
         panel = dialog.leaf_panel
@@ -824,7 +824,7 @@ def test_a_picture_under_way_in_the_gallery_is_not_fetched_again_by_the_pane(svc
     release = threading.Event()
     asked = []
 
-    def slow(sid, _meta):
+    def slow(sid, _meta, *_w):
         asked.append(sid)
         release.wait(5)
         return _image()
@@ -849,8 +849,8 @@ def test_a_picture_under_way_in_the_gallery_is_not_fetched_again_by_the_pane(svc
 def test_the_gallery_skips_a_picture_the_pane_is_fetching(monkeypatch):
     got = []
     started = []
-    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta: started.append(sid) or None)
-    pool = picker._ThumbPool(lambda sid, image: got.append(sid), skip=lambda sid: sid == 'busy')
+    monkeypatch.setattr(picker, '_thumbnail_image', lambda sid, meta, *_w: started.append(sid) or None)
+    pool = picker._ThumbPool(lambda sid, image, *_w: got.append(sid), skip=lambda sid: sid == 'busy')
     pool.want(['busy', 'free'])
     assert _wait(lambda: not pool.running())
     assert started == ['free']
@@ -862,13 +862,13 @@ def test_the_panes_request_goes_first_and_the_gallerys_own_requests_never_drop_i
     release = threading.Event()
     started = []
 
-    def slow(sid, _meta):
+    def slow(sid, _meta, *_w):
         started.append(sid)
         release.wait(5)
         return None
     monkeypatch.setattr(picker, '_thumbnail_image', slow)
     got = []
-    pool = picker._ThumbPool(lambda sid, image: got.append(sid))
+    pool = picker._ThumbPool(lambda sid, image, *_w: got.append(sid))
     pool.want(['a', 'b', 'c', 'd', 'e'])
     assert pool.running() == {'a', 'b', 'c'}
     pool.fetch('x')                                           # the pane's, while every slot is busy

@@ -38,7 +38,7 @@ def test_a_known_view_is_kept(value):
     assert normal_view(value) == value
 
 
-@pytest.mark.parametrize('value', [None, 'xl', 1, 'M'])
+@pytest.mark.parametrize('value', [None, 'xxl', 1, 'M'])
 def test_an_unknown_size_is_the_medium(value):
     assert normal_size(value) == DEFAULT_SIZE == 'm'
 

@@ -8,7 +8,7 @@ tests/shelfmark_tree_fixture.py.
 * A join with a place on the shelf is a link: the dialog goes to that shelfmark, selects it and the
   pane shows it. Its box chooses it as its box in the list would, turning the multiple choice on in
   a picker that has it; unticked, it is no longer chosen. A partner with no id or no place is its
-  shelfmark alone.
+  shelfmark alone. Ticking a join ticks the shelfmark the pane shows too (round 5, as on the desktop).
 * The rows' signs (PGP, a scholarly transcription, a join), read once off the loop: the rows are
   drawn without them, then again with them; the tooltip names them.
 """
@@ -296,14 +296,15 @@ def test_a_joins_box_turns_the_multiple_choice_on_and_chooses_it(tmp_path, monke
             seen['boxes'] = sorted(e.props['data-join-box'] for e in _els(user, 'data-join-box'))
             seen['before'] = (switch.value, box_of(user, NEAR).props.get('aria-checked'))
             UserInteraction(user, {box_of(user, NEAR)}, None).click()
-            # the multiple choice is on, and the partner is chosen: its box here and its row in the list
-            assert await _until(lambda: ticked(user) == {NEAR})
+            # the multiple choice is on, and the partner is chosen with the shelfmark the pane shows (the
+            # fragments of a join together, as on the desktop): its box here and both rows in the list
+            assert await _until(lambda: ticked(user) == {HERE, NEAR})
             assert await _until(lambda: box_of(user, NEAR).props.get('aria-checked') == 'true')
             seen['on'] = (switch.value, _leaf(user, NEAR).props.get('role'), _pane_shelfmark(user))
             UserInteraction(user, {box_of(user, FAR)}, None).click()          # one in another volume
             assert await _until(lambda: box_of(user, FAR).props.get('aria-checked') == 'true')
-            UserInteraction(user, {box_of(user, NEAR)}, None).click()         # unticked: no longer chosen
-            assert await _until(lambda: ticked(user) == set())
+            UserInteraction(user, {box_of(user, NEAR)}, None).click()         # unticked: the partner alone out
+            assert await _until(lambda: ticked(user) == {HERE})
             assert await _until(lambda: box_of(user, NEAR).props.get('aria-checked') == 'false')
             UserInteraction(user, {_testid(user, 'shelf-picker-confirm')[0]}, None).click()
             assert await _until(lambda: CONFIRMED)
@@ -315,7 +316,7 @@ def test_a_joins_box_turns_the_multiple_choice_on_and_chooses_it(tmp_path, monke
     assert seen['boxes'] == sorted([NEAR, FAR])                            # only partners with a place
     assert seen['before'] == (False, 'false')
     assert seen['on'] == (True, 'checkbox', LABEL[HERE])                    # the pane stays where it was
-    assert CONFIRMED == [[FAR]]
+    assert CONFIRMED == [[HERE, FAR]]
 
 
 # -- the rows' signs ------------------------------------------------------------------------------

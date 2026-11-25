@@ -272,6 +272,7 @@ CARD_SIZES = {
     "s": (200, 188, 100, 5),
     "m": (232, 220, 130, 4),
     "l": (312, 300, 240, 3),
+    "xl": (472, 460, 380, 2),
 }
 
 
@@ -2896,7 +2897,7 @@ if _QT_AVAILABLE:
             self.card_size_combo = QComboBox()
             self.card_size_combo.setToolTip(tr("Card size"))
             self.card_size_combo.setAccessibleName(tr("Card size"))
-            for key, label in (("s", tr("Small")), ("m", tr("Medium")), ("l", tr("Large"))):
+            for key, label in (("s", tr("Small")), ("m", tr("Medium")), ("l", tr("Large")), ("xl", tr("Extra large"))):
                 self.card_size_combo.addItem(label, key)
             self.card_size_combo.setCurrentIndex(self.card_size_combo.findData(self.card_size))
             self.card_size_combo.currentIndexChanged.connect(self._on_card_size_changed)
@@ -4093,6 +4094,11 @@ if _QT_AVAILABLE:
                 except RuntimeError:
                     pass
                 return
+            # Extra large cards ask NLI for a sharper picture than its 400-pixel thumbnail
+            # (the shelf picker's Large and Extra large do too).
+            if self.card_size == "xl":
+                from shared.shelfmark_tree_details import sized_image_url
+                url = sized_image_url(url, 600)
             # Deliberately NOT the bounded pool: all of a page's thumbnails start at once.
             # The loader goes to wb._grid_img_threads, outside the pool's count (a pool
             # image must not wait for a page of thumbnails), where _cancel_images retires it.

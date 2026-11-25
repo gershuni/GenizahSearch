@@ -42,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import html
 import inspect
+import json
 import logging
 from typing import Any, Callable, Optional
 
@@ -52,7 +53,7 @@ from shared.shelfmark_tree_columns import (NODE_ROWS, WIDE_COLUMNS, leaf_in_view
 from shared.shelfmark_tree_details import add_joins, field_lines, item_details
 from shared.shelfmark_tree_limits import chip_name, limit_for, refusal_message
 from shared.shelfmark_tree_rows import (
-    COLUMNS, HEADER_TIPS, SIZE_LABELS, SIZES, STORAGE_KEY, choice_value, folds_columns,
+    COLUMNS, DETAILS_KEY, HEADER_TIPS, SIZE_LABELS, SIZES, STORAGE_KEY, choice_value, details_shown, folds_columns,
     normal_size, normal_view, read_choice, row_details, shown_columns, wanted,
 )
 from shared.shelfmark_tree_selection import ALL, DIRECT, NODE, Chip, Selection, members_function, scope_for
@@ -80,6 +81,14 @@ _CSS = """
   color: var(--text-primary, #1d2129); font-size: 13px; }
 .stp-d-thumb img { display: block; max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 6px;
   background: var(--bg-tertiary, #f3f5f8); }
+/* the picture, zoomable (_ZOOM_JS): the box is the fitted picture's size, the zoomed picture moves in it */
+.stp-d-zoom { width: fit-content; max-width: 100%; margin: 0 auto; overflow: hidden; border-radius: 6px;
+  touch-action: none; }
+.stp-d-zoom > img { transform-origin: 0 0; user-select: none; -webkit-user-drag: none; }
+.stp-d-zoom.stp-zoomed { cursor: grab; }
+.stp-d-zoom.stp-zoomed:active { cursor: grabbing; }
+.stp-d-ibar { display: flex; align-items: center; gap: 2px; }
+.stp-d-ibar > .stp-d-pnav { flex: 1 1 auto; }
 /* labelled fields, one under the other, each spotted by its label (round 4) */
 .stp-d-text { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .stp-d-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -120,6 +129,14 @@ _CSS = """
 .stp-sign-join { color: var(--text-secondary, #5b6270); }
 .stp-row.stp-on .stp-sign-icon { color: #fff; }
 /* the pane below the columns where both would not fit side by side */
+/* the details pane hidden by the reader (its button in the header): the shelfmarks take its room. A
+   phone folds the pane its own way (the bar under the list), so there the button is not shown */
+@media (min-width: 901px) { .stp-main.stp-pane-hidden > .stp-details { display: none; } }
+@media (max-width: 900px) { .stp-pane-toggle { display: none; } }
+.stp-pane-toggle[aria-pressed="false"] { opacity: .6; }
+.stp-d-jhead { display: flex; align-items: center; gap: 6px; }
+/* the manuscript's other images, under its picture */
+.stp-d-pnav { display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 12px; }
 @media (max-width: 1180px) {
   .stp-main { flex-direction: column; }
   .stp-details { flex: 0 0 auto; max-height: 34%; min-width: 0; flex-direction: row; align-items: flex-start;
@@ -245,6 +262,13 @@ _CSS = """
 .stp-row:has(> .stp-node-box) { justify-content: flex-start; }
 .stp-row:has(> .stp-node-box) > .stp-count { margin-inline-start: auto; }
 .stp-node-box:focus-visible, .stp-row:focus-visible { outline: 2px solid #1f5fbf; outline-offset: -2px; }
+/* the row the keyboard is on: a frame inside it. The site's focus ring (common.css, !important) is drawn
+   outside the element, and in a list that scrolls only its top and bottom showed: green lines on the
+   neighbouring rows' edges (owner, 2026-11-25) */
+.stp-list > :is([data-node], [data-leaf]):focus-visible {
+  outline: 2px solid var(--primary-600, #1f5fbf) !important; outline-offset: -2px !important; }
+/* the row the keyboard is on looks chosen, as a list's current row does on the desktop */
+.stp-list > .stp-row[data-node]:focus { background: var(--bg-tertiary, #eef3fb); }
 .stp-whole { justify-content: flex-start; border: 1px dashed var(--border-light, #d5d8de); border-radius: 8px;
   min-height: 34px; padding: 4px 10px; }
 .stp-chips { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; overflow: hidden; min-height: 34px; }
@@ -321,6 +345,7 @@ _CSS = """
 .stp-size-s { --stp-tw: 150px; --stp-th: 140px; }
 .stp-size-m { --stp-tw: 180px; --stp-th: 160px; }
 .stp-size-l { --stp-tw: 280px; --stp-th: 240px; }
+.stp-size-xl { --stp-tw: 440px; --stp-th: 380px; }
 .stp-tile { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 6px; min-width: 0;
   border: 1px solid var(--border-light, #d5d8de); border-radius: 8px; cursor: pointer; background: var(--bg-primary, #fff); }
 .stp-tile:hover { background: var(--bg-tertiary, #f3f5f8); }
@@ -456,10 +481,480 @@ def _thumbnail_src(sys_id: str, shelfmark: str, width: int = 320) -> str:
         return ''
 
 
+def _joins_state(partner_ids, chosen) -> str:
+    """The joins' box: ``all`` when every partner is chosen, ``some``, or ``none``."""
+    ticked = [sid in chosen for sid in partner_ids]
+    return 'all' if ticked and all(ticked) else ('some' if any(ticked) else 'none')
+
+
+def _add_with_shown(selection, members_of, partners, shown) -> bool:
+    """Join partners ticked with the shelfmark the pane shows (first: the fragments of a join are chosen
+    together), each only when it is not chosen already; answers whether anything changed."""
+    chosen, changed = selection.chosen_set(members_of), False
+    ids = {lf.sys_id for lf in partners}
+    for lf in ([shown] if shown is not None and shown.sys_id not in ids else []) + list(partners):
+        if lf.sys_id not in chosen:
+            changed = selection.add_leaf(lf, members_of) or changed
+    return changed
+
+
+def _image_total(sys_id: str) -> int:
+    """How many images the manuscript has at NLI (the list ``/api/nli_image_by_sysid`` pages through), 0
+    when it is not known. BLOCKING (the routes' cache, the 30-day store, else the manifest): off the loop."""
+    try:
+        from web.api import nli_fl_ids
+        return len(nli_fl_ids(sys_id))
+    except Exception:   # noqa: BLE001 -- the first image alone
+        logger.debug("shelf picker: no image list for %s", sys_id, exc_info=True)
+        return 0
+
+
+def _page_src(sys_id: str, shelfmark: str, page: int, width: int) -> str:
+    """The address of the manuscript's image ``page`` (from 1), by the site's own image routes."""
+    try:
+        from web.components.candidate_grid import build_thumbnail_url
+        return build_thumbnail_url(sys_id, page, shelfmark or '', _code_of(sys_id), width=width) or ''
+    except Exception:   # noqa: BLE001 -- no image
+        return ''
+
+
+#: The pane's picture, zoomed in the browser: the wheel over it (at the pointer), + / -, a drag once zoomed,
+#: a double click to fit it again; past 1 the picture is asked for again at 1,200 pixels when its address
+#: has a width (the site's image routes), once. ``__stpZoom.by(id, factor)`` / ``reset(id)``, ``id`` the
+#: box's element id. Defined once a page.
+_ZOOM_JS = """
+window.__stpZoom = window.__stpZoom || {
+  MAX: 8,
+  box(id) { return document.getElementById('c' + id); },
+  init(id) {
+    const box = this.box(id);
+    if (!box || box.__z) return;
+    box.__z = {z: 1, x: 0, y: 0, r: 0, drag: null};
+    box.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      this.by(id, e.deltaY < 0 ? 1.25 : 0.8, e);
+    }, {passive: false});
+    box.addEventListener('pointerdown', (e) => {
+      const st = box.__z;
+      if (st.z <= 1) return;
+      st.drag = {px: e.clientX, py: e.clientY, x: st.x, y: st.y};
+      box.setPointerCapture(e.pointerId);
+    });
+    box.addEventListener('pointermove', (e) => {
+      const st = box.__z;
+      if (!st.drag) return;
+      st.x = st.drag.x + e.clientX - st.drag.px;
+      st.y = st.drag.y + e.clientY - st.drag.py;
+      this.apply(box);
+    });
+    const stop = () => { if (box.__z) box.__z.drag = null; };
+    box.addEventListener('pointerup', stop);
+    box.addEventListener('pointercancel', stop);
+    box.addEventListener('dblclick', () => this.reset(id));
+  },
+  by(id, f, e) {
+    const box = this.box(id);
+    if (!box) return;
+    if (!box.__z) this.init(id);
+    const st = box.__z, r = box.getBoundingClientRect();
+    const z = Math.min(this.MAX, Math.max(1, st.z * f));
+    if (z === st.z) return;
+    const px = e ? e.clientX - r.left : r.width / 2, py = e ? e.clientY - r.top : r.height / 2;
+    st.x = px - (px - st.x) / st.z * z;
+    st.y = py - (py - st.y) / st.z * z;
+    st.z = z;
+    this.apply(box);
+    this.sharpen(box);
+  },
+  apply(box) {
+    const st = box.__z, img = box.querySelector('img');
+    if (!img) return;
+    const w = img.offsetWidth, h = img.offsetHeight;
+    st.x = Math.min(0, Math.max(w - w * st.z, st.x));
+    st.y = Math.min(0, Math.max(h - h * st.z, st.y));
+    if (st.z <= 1) { st.x = 0; st.y = 0; }
+    // the turn about the picture's middle, smaller on its side so that it fits the box it had upright
+    let turn = '';
+    if (st.r) {
+      const side = st.r % 180 !== 0, k = side && w && h ? Math.min(w / h, h / w) : 1;
+      turn = ` translate(${w / 2}px, ${h / 2}px) rotate(${st.r}deg) scale(${k}) translate(${-w / 2}px, ${-h / 2}px)`;
+    }
+    const zoom = st.z > 1 ? `translate(${st.x}px, ${st.y}px) scale(${st.z})` : '';
+    img.style.transform = (zoom + turn).trim();
+    box.classList.toggle('stp-zoomed', st.z > 1);
+  },
+  sharpen(box) {
+    const img = box.querySelector('img');
+    if (!img || box.__z.z <= 1 || img.dataset.sharp === img.getAttribute('src')) return;
+    const src = img.getAttribute('src') || '';
+    if (!/[?&]width=\\d+/.test(src)) return;
+    const sharp = src.replace(/([?&]width=)\\d+/, '$11200');
+    const pre = new Image();
+    pre.onload = () => { if (img.getAttribute('src') === src) { img.src = sharp; img.dataset.sharp = sharp; } };
+    pre.src = sharp;
+  },
+  rotate(id, degrees) {
+    // a quarter turn (90 clockwise, -90 back), fitted again; another page keeps it, another shelfmark
+    // (a new box) starts upright
+    const box = this.box(id);
+    if (!box) return;
+    if (!box.__z) this.init(id);
+    box.__z.r = ((box.__z.r + degrees) % 360 + 360) % 360;
+    box.__z.z = 1;
+    this.apply(box);
+  },
+  reset(id) {
+    const box = this.box(id);
+    if (!box || !box.__z) return;
+    box.__z.z = 1;
+    this.apply(box);
+  },
+};
+"""
+
+
+#: The picker's keyboard (owner, 2026-11-25), the desktop's map: every list is one Tab stop (its rows
+#: tabindex -1 but one, the "roving" row: the one chosen, else the one last in focus, else the first),
+#: and in it the arrows, Home / End and PgUp / PgDn move (in the thumbnails and the wrapped grid the side
+#: arrows too); in a column the arrow forward (mirrored in Hebrew) opens the row and goes into the next
+#: list, the arrow back goes to the list before (from the first, one level up). From a list: Ctrl + an arrow
+#: is the pane's previous / next image (as its arrows on screen), + / - / 0 zoom its picture, 1 / 2 / 3
+#: the shelfmarks as a list, a table, thumbnails, [ / ] the thumbnails' size, S "Open more than one". Enter
+#: in the multiple choice is the Open button (the server's ``enter_several``). Anywhere in
+#: the picker: Ctrl+F the filter of the list in use, Alt+D the details pane; Esc in a filter goes back to
+#: its list (it never closes the picker there), Tab in a filter goes into its list. Tab / Shift+Tab in a
+#: list go to the next / previous list alone (past the ends the page's order goes on: no trap); F6 /
+#: Shift+F6 leave the lists for the field after / before them, and from there come back. Space and Enter
+#: stay the rows' own (the server's). Keys by
+#: ``code`` where the layout changes the letter (a Hebrew keyboard). Installed once a page; ``fix()``
+#: after each drawing (also on any change of the card's lists, debounced).
+_KEYS_JS = """
+window.__stpKeys = window.__stpKeys || (() => {
+  const ITEMS = ':scope > [data-node], :scope > [data-leaf]';
+  const SIZES = SIZES_JSON;
+  const K = {
+    pending: null,
+    swallowEscUp: false,
+    card() {
+      // the picker on screen: a closed one may still be in the page for a moment (its dialog closing while
+      // another opens), so the visible one, never just the first (Codex on #129)
+      const cards = Array.from(document.querySelectorAll('.stp-card'));
+      return cards.find((c) => c.offsetParent !== null) || null;
+    },
+    shown(el) { return !!el && el.offsetParent !== null; },
+    lists(card) { return Array.from(card.querySelectorAll('.stp-list')).filter((l) => this.shown(l)); },
+    items(list) { return Array.from(list.querySelectorAll(ITEMS)); },
+    current(list) {
+      const its = this.items(list);
+      return its.find((i) => i.tabIndex === 0) || list.querySelector(':scope > .stp-on') || its[0] || null;
+    },
+    rove(list, item) { this.items(list).forEach((i) => { i.tabIndex = i === item ? 0 : -1; }); },
+    focus(list, item) {
+      item = item || this.current(list);
+      if (!item) return;
+      this.rove(list, item);
+      item.focus();
+      item.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    },
+    columns(its) {
+      if (its.length < 2) return 1;
+      const top = its[0].offsetTop;
+      let n = 0;
+      while (n < its.length && its[n].offsetTop === top) n += 1;
+      return Math.max(1, n);
+    },
+    fix() {
+      const card = this.card();
+      if (!card) return;
+      if (!card.__stpKeys) {
+        card.__stpKeys = true;
+        let timer = null;
+        new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(() => this.fix(), 40); })
+          .observe(card, {childList: true, subtree: true});
+      }
+      card.querySelectorAll('.stp-list').forEach((list) => {
+        const its = this.items(list);
+        if (!its.length) return;
+        if (its.filter((i) => i.tabIndex === 0).length === 1) return;
+        this.rove(list, its.find((i) => i.tabIndex === 0) || list.querySelector(':scope > .stp-on') || its[0]);
+      });
+      let p = this.pending;
+      if (p && Date.now() - p.at > 3000) { this.pending = p = null; }
+      if (!p) {
+        if (this.lost(card)) { const home = this.home(card); if (home) this.focus(home); }
+        return;
+      }
+      const lists = this.lists(card);
+      if (p.kind === 'into') {
+        const row = Array.from(card.querySelectorAll('.stp-list > [data-node]')).find((r) => r.dataset.node === p.id);
+        if (!row || !row.classList.contains('stp-on')) return;          // not drawn yet: the next fix
+        const at = lists.indexOf(row.parentElement);
+        this.pending = null;
+        const next = at >= 0 ? lists[at + 1] : null;
+        if (next) this.focus(next);
+      } else if (p.old && p.old.isConnected) {
+        // the lists not drawn again yet: the next fix (a change of the card's lists) looks again
+        if (Date.now() - p.at > 3000) this.pending = null;
+      } else if (p.kind === 'leaves') {
+        this.pending = null;
+        const list = card.querySelector('.stp-leaves .stp-list');
+        if (!this.shown(list)) return;
+        const same = p.leaf ? this.items(list).find((i) => i.dataset.leaf === p.leaf) : null;
+        this.focus(list, same || null);
+      } else if (p.kind === 'up') {
+        this.pending = null;
+        const nodes = lists.filter((l) => l.querySelector(':scope > [data-node]'));
+        if (nodes.length) this.focus(nodes[nodes.length - 1]);
+      }
+    },
+    click(card, testid) {
+      const el = card.querySelector(`[data-testid="${testid}"]`);
+      if (this.shown(el) && !el.disabled && !el.classList.contains('disabled')) el.click();
+    },
+    paneShown(card) {
+      const pane = card.querySelector('[data-testid="shelf-details"]');
+      return this.shown(pane) && getComputedStyle(pane).display !== 'none';
+    },
+    toFilter(card, target) {
+      const col = target.closest('.stp-col') || card.querySelector('.stp-leaves')
+        || Array.from(card.querySelectorAll('.stp-col')).filter((c) => this.shown(c)).pop();
+      const box = col && col.querySelector('.stp-filter input');
+      if (box) { box.focus(); box.select(); }
+    },
+    home(card) {
+      // where the keyboard starts, as the desktop's: the list of the next choice (a column of nodes none of
+      // which is open), else the shelfmarks, else the last list
+      const lists = this.lists(card).filter((l) => this.items(l).length);
+      const next = lists.filter((l) => l.querySelector(':scope > [data-node]') && !l.querySelector(':scope > .stp-on'));
+      return next[next.length - 1] || card.querySelector('.stp-leaves .stp-list') || lists[lists.length - 1] || null;
+    },
+    lost(card) {
+      // the keyboard is nowhere in the picker's lists or fields (the opening; a row drawn again under it)
+      const a = document.activeElement;
+      if (!a || a === document.body || !a.isConnected || a === card) return true;
+      // the picker's own dialog around the card (another dialog over it keeps its keyboard)
+      const dlg = a.closest('.q-dialog');
+      return !card.contains(a) && !!dlg && dlg.contains(card);
+    },
+    choose(item) {
+      // moving onto a shelfmark selects it, as a click does (the single choice: the pane shows it and Open
+      // takes it); once the keyboard rests, so a held arrow does not load every row it passes
+      clearTimeout(this.chooseTimer);
+      if (!item.hasAttribute('data-leaf') || item.getAttribute('role') !== 'option') return;
+      this.chooseTimer = setTimeout(() => {
+        if (item.isConnected && document.activeElement === item && item.getAttribute('aria-selected') !== 'true') item.click();
+      }, 250);
+    },
+    focusables(card) {
+      const sel = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+      return Array.from(card.querySelectorAll(sel)).filter((el) => this.shown(el) && !el.disabled
+        && el.tabIndex >= 0 && !el.closest('.stp-list') && !el.closest('.stp-filter'));
+    },
+    leave(card, t, step) {
+      // F6 / Shift+F6: from a list, the first field after the lists / before them (the filters passed by);
+      // from anywhere else, back into the list last in use
+      const lists = this.lists(card);
+      if (!lists.length) return;
+      const inList = lists.find((l) => l.contains(t));
+      if (!inList) {
+        const last = this.lastList && this.lastList.isConnected && this.shown(this.lastList) ? this.lastList : lists[0];
+        this.focus(last);
+        return;
+      }
+      this.lastList = inList;
+      const edge = step > 0 ? lists[lists.length - 1] : lists[0];
+      const others = this.focusables(card);
+      const pick = step > 0
+        ? others.find((el) => edge.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)
+        : others.reverse().find((el) => edge.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING);
+      if (pick) pick.focus();
+    },
+    back(card, list) {
+      const lists = this.lists(card), at = lists.indexOf(list);
+      if (at > 0) { this.focus(lists[at - 1]); return; }
+      const up = card.querySelector('.stp-back');
+      if (this.shown(up)) { this.pending = {kind: 'up', at: Date.now(), old: list}; up.click(); }
+    },
+    forward(card, list, item) {
+      if (!item.hasAttribute('data-node')) return;
+      if (item.classList.contains('stp-on')) {
+        const lists = this.lists(card), next = lists[lists.indexOf(list) + 1];
+        if (next) this.focus(next);
+        return;
+      }
+      this.pending = {kind: 'into', id: item.dataset.node, at: Date.now()};
+      item.click();
+    },
+    viewKey(card, e, item) {
+      // 1 / 2 / 3 the shelfmarks as a list, a table, thumbnails; [ / ] the thumbnails smaller / larger (by
+      // the key, not the letter: a Hebrew layout types them the other way round). The keyboard goes back
+      // to the shelfmarks once they are drawn again.
+      const views = {Digit1: 'list', Digit2: 'table', Digit3: 'gallery', Numpad1: 'list', Numpad2: 'table',
+                     Numpad3: 'gallery'};
+      if (views[e.code]) {
+        const b = card.querySelector(`button[data-view="${views[e.code]}"]`);
+        if (this.shown(b) && b.getAttribute('aria-pressed') !== 'true') {
+          this.pending = {kind: 'leaves', at: Date.now(), old: card.querySelector('.stp-leaves .stp-list'),
+                        leaf: item.dataset.leaf};
+          b.click();
+        }
+        return true;
+      }
+      if (e.code !== 'BracketLeft' && e.code !== 'BracketRight') return false;
+      const toggle = card.querySelector('[data-testid="shelf-thumb-size"]');
+      if (!this.shown(toggle)) return true;
+      // the size now from the thumbnails' own class (stp-size-<key>), the buttons in SIZES' order
+      const buttons = Array.from(toggle.querySelectorAll('button'));
+      const gallery = card.querySelector('.stp-gallery');
+      const now = gallery ? (Array.from(gallery.classList).find((c) => c.startsWith('stp-size-')) || '') : '';
+      const at = SIZES.indexOf(now.slice('stp-size-'.length));
+      const to = buttons[at + (e.code === 'BracketLeft' ? -1 : 1)];
+      if (at >= 0 && to) {
+        this.pending = {kind: 'leaves', at: Date.now(), old: card.querySelector('.stp-leaves .stp-list'),
+                        leaf: item.dataset.leaf};
+        to.click();
+      }
+      return true;
+    },
+    key(e) {
+      const card = this.card();
+      if (!card) return;
+      if (['ArrowDown', 'ArrowUp'].includes(e.key) && !e.ctrlKey && !e.altKey && !e.metaKey && this.lost(card)) {
+        const home = this.home(card);
+        if (home) { e.preventDefault(); this.focus(home); }
+        return;
+      }
+      if (!card.contains(e.target)) return;
+      const t = e.target, rtl = card.getAttribute('dir') === 'rtl';
+      const fwd = rtl ? 'ArrowLeft' : 'ArrowRight', bwd = rtl ? 'ArrowRight' : 'ArrowLeft';
+      const typing = t.matches('input, textarea, [contenteditable="true"]');
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && !e.altKey && e.code === 'KeyF') { e.preventDefault(); e.stopPropagation(); this.toFilter(card, t); return; }
+      if (e.altKey && !ctrl && e.code === 'KeyD') {
+        e.preventDefault();
+        this.click(card, 'shelf-details-toggle');
+        return;
+      }
+      if (e.key === 'F6') { e.preventDefault(); this.leave(card, t, e.shiftKey ? -1 : 1); return; }
+      if (e.key === 'Tab' && !e.shiftKey && !ctrl && !e.altKey && typing && t.closest('.stp-filter')) {
+        const col = t.closest('.stp-col'), list = col && col.querySelector('.stp-list');
+        if (this.shown(list) && this.items(list).length) { e.preventDefault(); this.focus(list); }
+        return;
+      }
+      if (e.key === 'Escape' && typing && t.closest('.stp-filter')) {
+        const col = t.closest('.stp-col'), list = col && col.querySelector('.stp-list');
+        if (this.shown(list) && this.items(list).length) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          this.swallowEscUp = true;
+          this.focus(list);
+        }
+        return;
+      }
+      if (typing) return;
+      const item = t.closest('.stp-list > [data-node], .stp-list > [data-leaf]');
+      if (!item) return;
+      const list = item.parentElement, its = this.items(list), i = its.indexOf(item);
+      if ((e.key === 'Enter' || (e.key === ' ' && !item.querySelector('[data-node-box]')))
+          && item.hasAttribute('data-node') && !ctrl && !e.altKey) {
+        this.pending = {kind: 'into', id: item.dataset.node, at: Date.now()};
+        return;                                       // the row's own handler opens it
+      }
+      if (e.key === 'Tab' && !ctrl && !e.altKey) {
+        // the next / previous list, the filters and buttons passed by; past the last or the first the
+        // page's own order goes on (no trap: F6 leaves the lists too)
+        const lists = this.lists(card), to = lists[lists.indexOf(list) + (e.shiftKey ? -1 : 1)];
+        if (to && this.items(to).length) { e.preventDefault(); this.focus(to); }
+        return;
+      }
+      if (ctrl && !e.altKey && (e.key === fwd || e.key === bwd)) {
+        e.preventDefault();
+        if (this.paneShown(card)) this.click(card, e.key === fwd ? 'shelf-page-next' : 'shelf-page-prev');
+        return;
+      }
+      if (ctrl || e.altKey) return;
+      if (['+', '=', '-', '0'].includes(e.key)) {
+        e.preventDefault();
+        if (!this.paneShown(card)) return;
+        if (e.key === '0') {
+          const box = card.querySelector('.stp-d-zoom');
+          if (box && window.__stpZoom) window.__stpZoom.reset(box.id.slice(1));
+        } else {
+          this.click(card, e.key === '-' ? 'shelf-zoom-out' : 'shelf-zoom-in');
+        }
+        return;
+      }
+      if (this.viewKey(card, e, item)) { e.preventDefault(); return; }
+      if (e.code === 'KeyS' && !e.shiftKey) {
+        // S: "Open more than one" on or off (by the key: a Hebrew layout types ד there)
+        e.preventDefault();
+        const sw = card.querySelector('[data-testid="shelf-picker-switch"]');
+        if (this.shown(sw)) { this.pending = {kind: 'leaves', at: Date.now(), old: card.querySelector('.stp-leaves .stp-list'), leaf: item.dataset.leaf}; sw.click(); }
+        return;
+      }
+      const cols = this.columns(its);
+      let to = null;
+      if (e.key === 'ArrowDown') to = i + cols;
+      else if (e.key === 'ArrowUp') to = i - cols;
+      else if (e.key === 'Home') to = 0;
+      else if (e.key === 'End') to = its.length - 1;
+      else if (e.key === 'PageDown' || e.key === 'PageUp') {
+        const rows = Math.max(1, Math.floor(list.clientHeight / Math.max(1, item.offsetHeight)) - 1);
+        to = i + (e.key === 'PageDown' ? 1 : -1) * rows * cols;
+      } else if (e.key === fwd || e.key === bwd) {
+        e.preventDefault();
+        if (cols > 1) {
+          const step = e.key === fwd ? 1 : -1;
+          if (i + step < 0) { this.back(card, list); return; }
+          to = i + step;
+        } else if (e.key === bwd) {
+          this.back(card, list);
+          return;
+        } else {
+          this.forward(card, list, item);
+          return;
+        }
+      } else {
+        return;
+      }
+      e.preventDefault();
+      const target = its[Math.max(0, Math.min(its.length - 1, to))];
+      this.focus(list, target);
+      this.choose(target);
+    },
+  };
+  window.addEventListener('keydown', (e) => K.key(e), true);
+  window.addEventListener('click', (e) => {
+    const row = e.target.closest && e.target.closest('.stp-list > [data-node]');
+    if (row && !e.target.closest('[data-node-box]') && K.card() && K.card().contains(row)) {
+      K.pending = {kind: 'into', id: row.dataset.node, at: Date.now()};
+    }
+  }, true);
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'Escape' && K.swallowEscUp) { K.swallowEscUp = false; e.stopImmediatePropagation(); }
+  }, true);
+  window.addEventListener('focusin', (e) => {
+    const item = e.target.closest && e.target.closest('.stp-list > [data-node], .stp-list > [data-leaf]');
+    if (item) K.rove(item.parentElement, item);
+  }, true);
+  return K;
+})();
+"""
+
+
+_KEYS_JS = _KEYS_JS.replace('SIZES_JSON', json.dumps(list(SIZES)))
+
+
+def _run_js(element, code: str) -> None:
+    """A script in the browser of ``element``'s reader (one seam, for the tests): through the element's own
+    client, which a background task has no context for."""
+    element.client.run_javascript(code)
+
+
 # -- the table and the thumbnails (shared/shelfmark_tree_rows.py, VX1-VX9) ------------------------
 
 #: Each thumbnail size's image width, as the Joins Lab fetches its cards' (``candidate_grid.CARD_SIZES``).
-_THUMB_WIDTH = {'s': 300, 'm': 300, 'l': 600}
+_THUMB_WIDTH = {'s': 300, 'm': 300, 'l': 600, 'xl': 800}
 #: The switch's buttons: a view, its icon, what the button does.
 _VIEW_BUTTONS = (('list', 'view_list', 'Show as a list'), ('table', 'table_rows', 'Show as a table'),
                  ('gallery', 'grid_view', 'Show as thumbnails'))
@@ -988,7 +1483,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
     st = {'path': (), 'filters': {}, 'shown': {}, 'highlight': None, 'parts': {}, 'owed': set(), 'list_node': None,
           'ready': False}
     ms = {'sel': Selection(), 'owner': '', 'state': None, 'sgen': 0, 'ticks': {}, 'boxes': {}, 'whole': None,
-          'busy': False, 'warned': False, 'since': None, 'big': {}, 'jticks': {}}
+          'busy': False, 'warned': False, 'since': None, 'big': {}, 'jticks': {}, 'jall': None}
     lock = asyncio.Lock()
     if multi or both:
         ms['owner'] = store.current_owner()
@@ -997,7 +1492,9 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
     # the single choice's selected shelfmark (DX21), and the pane's shelfmark and its generation (DX25)
     one = {'leaf': None, 'rows': {}}
     # ... the pane's contents as shown, the places of its join partners and the holders filled again
-    pane = {'gen': 0, 'leaf': None, 'info': None, 'places': {}, 'lines': None, 'joins': None, 'open': False}
+    pane = {'gen': 0, 'leaf': None, 'info': None, 'places': {}, 'lines': None, 'joins': None, 'open': False,
+            'hidden': not details_shown(safe_user_get(DETAILS_KEY)), 'pages': [], 'page': 0, 'nav': None,
+            'img': None}
     # the shelfmarks pane's view (VX1, kept per reader), the details of the rows (by sys_id, this dialog's
     # language), the thumbnails' addresses (by width, worked out again at each whole drawing), the HTML
     # each row's cells are drawn in, and the one loader (VX5)
@@ -1013,6 +1510,11 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             with ui.row().classes('w-full items-center justify-between no-wrap'):
                 h3(title or tr('Pick from the shelf'), classes='text-lg font-semibold m-0')
                 ui.element('div').style('flex: 1 1 auto;')
+                pane_btn = ui.button(icon='view_sidebar', on_click=lambda: set_pane_hidden(not pane['hidden'])).props(
+                    f'flat round dense data-testid="shelf-details-toggle" '
+                    f'aria-pressed="{"false" if pane["hidden"] else "true"}" '
+                    f'aria-label="{_attr(tr("Show or hide the details pane"))}"').classes(
+                    'stp-pane-toggle').tooltip(tr('Show or hide the details pane'))
                 if both:
                     switch = ui.switch(switch_label, value=multi, on_change=lambda e: flip(e)).props(
                         'dense color=primary data-testid="shelf-picker-switch"').classes('stp-switch')
@@ -1022,7 +1524,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             chips_row = None
             if multi or both:
                 chips_row = ui.element('div').classes('stp-chips w-full').props(f'data-chips="{dialog.id}"')
-            with ui.element('div').classes('stp-main w-full') as main_el:
+            with ui.element('div').classes('stp-main w-full' + (' stp-pane-hidden' if pane['hidden'] else '')) as main_el:
                 body = ui.element('div').classes('stp-body')
                 # not a live region: it holds a manuscript's whole text, read only when the reader goes to it
                 details = ui.element('div').classes('stp-details').props('role="region" data-testid="shelf-details"')
@@ -1189,6 +1691,16 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             main_el.classes(remove='stp-pane-open')
         bar_btn.props(f'aria-expanded="{"true" if on else "false"}"')
 
+    def set_pane_hidden(hidden: bool):
+        """The details pane hidden or shown by the reader (a wide screen), the choice kept per reader."""
+        pane['hidden'] = hidden
+        if hidden:
+            main_el.classes(add='stp-pane-hidden')
+        else:
+            main_el.classes(remove='stp-pane-hidden')
+        pane_btn.props(f'aria-pressed="{"false" if hidden else "true"}"')
+        safe_user_set(DETAILS_KEY, not hidden)
+
     def show_on_bar(leaf):
         """The phone's folded pane: the shelfmark the pane shows and its button, or the pane's hint
         (and folded: an empty pane is not left over the list)."""
@@ -1279,14 +1791,28 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         if holder is None or holder.is_deleted:
             return
         holder.clear()
-        ms['jticks'] = {}
+        ms['jticks'], ms['jall'] = {}, None
         joins = info.get('joins') or []
         holder.set_visibility(bool(joins))
         if not joins:
             return
         chosen = ((ms['state'] or {}).get('chosen') or set()) if multi else set()
+        placed_ids = [j.get('sys_id') for j in joins if j.get('sys_id') and pane['places'].get(j.get('sys_id'))]
         with holder:
-            ui.label(tr('Joins')).classes('stp-d-cap')
+            with ui.element('div').classes('stp-d-jhead'):
+                if (multi or both) and len(placed_ids) > 1:
+                    # a box before "Joins": every partner on the shelf ticked, some, or none; a click ticks
+                    # them all, or unticks them when all are (one change)
+                    state = _joins_state(placed_ids, chosen)
+                    with ui.element('span').classes('stp-node-box stp-d-jall').props(
+                            f'role="checkbox" aria-checked="{_ARIA[state]}" tabindex="0" '
+                            'data-testid="shelf-joins-all"') as all_box:
+                        all_icon = ui.icon(_BOX[state]).classes('stp-box')
+                    all_box.props['aria-label'] = tr('Choose all the joins')
+                    handler = (lambda _e=None: tick_partners(ms['jall'][2] != 'all' if ms['jall'] else True))
+                    all_box.on('click', handler).on('keydown.enter', handler).on('keydown.space.prevent', handler)
+                    ms['jall'] = (all_box, all_icon, state, tuple(placed_ids))
+                ui.label(tr('Joins')).classes('stp-d-cap')
             for join in joins:
                 sys_id = join.get('sys_id') or ''
                 name = join.get('shelfmark') or sys_id
@@ -1318,6 +1844,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         pane['gen'] = gen = pane['gen'] + 1
         pane['leaf'] = leaf
         show_on_bar(leaf)
+        pane.update(pages=[], page=0, nav=None, img=None, zoom=None)
         meta, pages_of, texts_of = _meta_mgr(), _page_count(), _page_texts()
         info, places = await run.io_bound(_pane_info, service, leaf, lang, meta, pages_of, texts_of)
         if gen != pane['gen'] or details.is_deleted or not info:
@@ -1334,11 +1861,28 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             return
         if url:
             with thumb:
-                img = ui.element('img').on('error', lambda _e=None, t=thumb: t.set_visibility(False))  # none: no broken one
+                with ui.element('div').classes('stp-d-zoom').props('data-testid="shelf-details-zoom"') as zoom_box:
+                    img = ui.element('img').on('error', lambda _e=None, t=thumb: t.set_visibility(False))  # none: no broken one
+                # under the picture: the manuscript's other images (filled by load_pages), zoom out / in
+                with ui.element('div').classes('stp-d-ibar'):
+                    bar_nav = ui.element('div').classes('stp-d-pnav')
+                    for icon, degrees, tip, test in (('rotate_left', -90, 'Rotate left', 'shelf-rotate-left'),
+                                                     ('rotate_right', 90, 'Rotate right', 'shelf-rotate-right')):
+                        ui.button(icon=icon, on_click=lambda _e=None, d=degrees, z=zoom_box: _run_js(
+                            z, f'window.__stpZoom && __stpZoom.rotate({z.id}, {d});')).props(
+                            f'flat round dense size=sm aria-label="{_attr(tr(tip))}" data-testid="{test}"').tooltip(tr(tip))
+                    for icon, factor, tip, test in (('zoom_out', 0.8, 'Zoom out', 'shelf-zoom-out'),
+                                                    ('zoom_in', 1.25, 'Zoom in', 'shelf-zoom-in')):
+                        ui.button(icon=icon, on_click=lambda _e=None, f=factor, z=zoom_box: _run_js(
+                            z, f'window.__stpZoom && __stpZoom.by({z.id}, {f});')).props(
+                            f'flat round dense size=sm aria-label="{_attr(tr(tip))}" data-testid="{test}"').tooltip(tr(tip))
             # set as values, not parsed from a props string (which keeps an escaped "&amp;" as it is)
-            img.props.update({'src': url, 'alt': info['shelfmark'], 'loading': 'lazy'})
+            img.props.update({'src': url, 'alt': info['shelfmark'], 'loading': 'lazy', 'draggable': 'false'})
             img.update()
             thumb.set_visibility(True)
+            pane['img'], pane['zoom'] = img, zoom_box
+            _run_js(zoom_box, _ZOOM_JS + f'__stpZoom.init({zoom_box.id});')
+            background_tasks.create(load_pages(gen, bar_nav, leaf, info, url), name='shelf-picker-pages')
         # what only the community database knows, last: a network read
         partners, comments, places = await run.io_bound(_community_and_places, service, leaf.sys_id)
         if gen != pane['gen'] or details.is_deleted:
@@ -1349,6 +1893,64 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             info['comments'] = comments
         fill_fields(info)
         fill_joins(info)
+
+    async def load_pages(gen: int, holder, leaf, info: dict, first: str):
+        """The manuscript's other images: previous / next under its picture and where it is ("2 of 6"),
+        when it has more than one; the next one asked of the browser before it is wanted."""
+        total = await run.io_bound(_image_total, leaf.sys_id)
+        if gen != pane['gen'] or holder.is_deleted or total < 2:
+            return
+        name = leaf.shelfmark or leaf.label
+        width = _THUMB_WIDTH['m']
+        pane['pages'] = [first] + [_page_src(leaf.sys_id, name, p, width) for p in range(2, total + 1)]
+        pane['page'] = 0
+        rtl = is_rtl()
+        with holder:
+            with ui.element('div').classes('stp-d-pnav').props('data-testid="shelf-details-pages"') as nav:
+                prev_btn = ui.button(icon='chevron_right' if rtl else 'chevron_left',
+                                     on_click=lambda: step_page(-1)).props(
+                    f'flat round dense size=sm aria-label="{_attr(tr("Previous image"))}" '
+                    'data-testid="shelf-page-prev"')
+                where = ui.label('').props('aria-live="polite"')
+                next_btn = ui.button(icon='chevron_left' if rtl else 'chevron_right',
+                                     on_click=lambda: step_page(1)).props(
+                    f'flat round dense size=sm aria-label="{_attr(tr("Next image"))}" '
+                    'data-testid="shelf-page-next"')
+        pane['nav'] = (nav, prev_btn, where, next_btn)
+        draw_page_nav()
+        prefetch_page(1)
+
+    def draw_page_nav():
+        nav = pane['nav']
+        if not nav or nav[0].is_deleted:
+            return
+        _nav, prev_btn, where, next_btn = nav
+        total, page = len(pane['pages']), pane['page']
+        where.set_text(tr('Image {n} of {total}').format(n=page + 1, total=total))
+        prev_btn.set_enabled(page > 0)
+        next_btn.set_enabled(page < total - 1)
+
+    def prefetch_page(page: int):
+        """The image after the one shown, asked of the browser (its cache has it when it is wanted)."""
+        pages, img = pane['pages'], pane['img']
+        if 0 < page < len(pages) and pages[page] and img is not None and not img.is_deleted:
+            # through the picture's own client: this runs in a background task too (load_pages), which has
+            # no page context for ui.run_javascript (owner's console, 2026-11-25)
+            _run_js(img, f'(new Image()).src = {json.dumps(pages[page])};')
+
+    def step_page(step: int):
+        pages, img = pane['pages'], pane['img']
+        page = max(0, min(len(pages) - 1, pane['page'] + step))
+        if page == pane['page'] or img is None or img.is_deleted or not pages[page]:
+            return
+        pane['page'] = page
+        img.props['src'] = pages[page]
+        img.update()
+        zoom_box = pane.get('zoom')
+        if zoom_box is not None and not zoom_box.is_deleted:      # the next page opens fitted
+            _run_js(zoom_box, f'window.__stpZoom && __stpZoom.reset({zoom_box.id});')
+        draw_page_nav()
+        prefetch_page(page + step)
 
     async def reveal(sys_id: str):
         """A join's link: the dialog goes to that shelfmark, which is shown in its column and
@@ -1379,7 +1981,9 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
 
     async def tick_partner(sys_id: str, box):
         """A join's box: the partner chosen, or no longer, as its box in the list would; in the single
-        choice it turns the multiple choice on first (and adds)."""
+        choice it turns the multiple choice on first (and adds). Ticking it ticks the shelfmark the pane
+        shows too (the fragments of a join are chosen together; it first, then the partner, one change
+        for the limit), as the desktop does; unticking takes out the partner alone."""
         leaf = pane['places'].get(sys_id)
         if leaf is None:
             return
@@ -1389,7 +1993,32 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         if on:
             await change(lambda s, m, lf=leaf: s.drop_leaf(lf.sys_id, m) if lf.sys_id in s.chosen_set(m) else False)
         else:
-            await change(lambda s, m, lf=leaf: s.add_leaf(lf, m) if lf.sys_id not in s.chosen_set(m) else False)
+            await change(lambda s, m, lfs=(leaf,), own=pane['leaf']: _add_with_shown(s, m, lfs, own))
+
+    async def tick_partners(on: bool):
+        """The joins' All / Clear: every partner with a place on the shelf chosen with the shelfmark the
+        pane shows, as one partner's box does (the single choice turns the multiple choice on first), or
+        the partners no longer (the shelfmark shown stays), in one change (the limit counts them
+        together)."""
+        leaves = [lf for lf in (pane['places'].get(j.get('sys_id') or '') for j in
+                                ((pane['info'] or {}).get('joins') or ())) if lf is not None]
+        if not leaves:
+            return
+        if not multi:
+            if not on or not await set_mode(True):
+                return
+
+        if on:
+            await change(lambda s, m, lfs=tuple(leaves), own=pane['leaf']: _add_with_shown(s, m, lfs, own))
+            return
+
+        def drop(s, m, lfs=tuple(leaves)):
+            chosen, changed = s.chosen_set(m), False
+            for lf in lfs:
+                if lf.sys_id in chosen:
+                    changed = s.drop_leaf(lf.sys_id, m) or changed
+            return changed
+        await change(drop)
 
     # -- Add to List, Add to Puzzle (DX22) ----------------------------------------------------
 
@@ -1583,6 +2212,11 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             ms['jticks'][sid] = alive
             for box, icon in alive:
                 set_box(box, icon, 'all' if sid in chosen else 'none')
+        if ms['jall'] is not None and not ms['jall'][0].is_deleted:   # the joins' box, as the partners are
+            all_box, all_icon, _old, ids = ms['jall']
+            look = _joins_state(ids, chosen)
+            set_box(all_box, all_icon, look)
+            ms['jall'] = (all_box, all_icon, look, ids)
         for nid, items in list(ms['boxes'].items()):
             alive = [(b, i) for b, i in items if not b.is_deleted]
             if not alive:
@@ -1861,7 +2495,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         if not multi:
             el = ui.element('div').classes(base + (' stp-on' if on else '')).props(
                 f'data-leaf="{leaf.id}" data-sys-id="{leaf.sys_id}" role="option" '
-                f'aria-selected="{"true" if on else "false"}" tabindex="0"').on(
+                f'aria-selected="{"true" if on else "false"}" tabindex="{0 if on else -1}"').on(
                 'click', lambda _e=None, lf=leaf: select(lf)).on(
                 'dblclick', lambda _e=None, lf=leaf: double(lf)).on(
                 'keydown.enter', lambda _e=None, lf=leaf: enter(lf)).on(
@@ -1873,9 +2507,9 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         el = ui.element('div').classes(base + ' stp-pick' + (' stp-on' if on else '')
                                        + (' stp-ticked' if ticked else '')).props(
             f'data-leaf="{leaf.id}" data-sys-id="{leaf.sys_id}" role="checkbox" '
-            f'aria-checked="{_ARIA[state]}" tabindex="0"').on(
+            f'aria-checked="{_ARIA[state]}" tabindex="{0 if on else -1}"').on(
             'click', lambda _e=None, lf=leaf: tick(lf)).on(
-            'keydown.enter', lambda _e=None, lf=leaf: tick(lf)).on(
+            'keydown.enter', lambda _e=None, lf=leaf: enter_several(lf)).on(
             'keydown.space.prevent', lambda _e=None, lf=leaf: tick(lf))
         with el:
             icon = ui.icon(_BOX[state]).classes('stp-box')
@@ -2007,6 +2641,14 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
                           on_change=lambda e: set_size(e.value)).props(
                     'dense no-caps data-testid="shelf-thumb-size"').tooltip(tr('Thumbnail size'))
 
+    async def enter_several(leaf):
+        """Enter in the multiple choice is the Open button (Space ticks): what is ticked opens; with
+        nothing ticked, the row Enter was pressed on is ticked first (owner, 2026-11-25)."""
+        state = ms['state'] or {}
+        if not state.get('chosen'):
+            await toggle_leaf(leaf)
+        await confirm()
+
     async def tick(leaf):
         """Multiple choice: the box, and the pane shows the row clicked last (not waited for)."""
         background_tasks.create(show_details(leaf), name='shelf-picker-details')
@@ -2019,7 +2661,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
         if too_big(count):
             ms['big'][node_id] = count
         with ui.element('span').classes('stp-node-box').props(
-                f'role="checkbox" aria-checked="{_ARIA[state]}" tabindex="0" data-node-box="{node_id}" '
+                f'role="checkbox" aria-checked="{_ARIA[state]}" tabindex="-1" data-node-box="{node_id}" '
                 f'aria-label="{_attr(tr("Choose all of it"))}"').on(
                 'click.stop', lambda _e=None, n=node_id: toggle_node(n, ALL)).on(
                 'keydown.enter.stop', lambda _e=None, n=node_id: toggle_node(n, ALL)).on(
@@ -2042,11 +2684,14 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             go_to = row.get('go')
             handler = ((lambda _e=None, g=go_to: go(g)) if go_to is not None
                        else (lambda _e=None, d=depth, n=row['id']: choose_node(d, n)))
+            # Space ticks the row's box where it has one (the desktop's rule), else opens it as Enter does;
+            # its box is reached through the row (tabindex -1: the list is one Tab stop, _KEYS_JS)
+            space = ((lambda _e=None, n=row['id']: toggle_node(n, ALL)) if tickable else handler)
             with ui.element('div').classes('stp-row' + (' stp-on' if row['on'] else '')
                                            + (' stp-link' if row.get('link') else '')).props(
-                    f'data-node="{row["id"]}" role="button" tabindex="0"'
+                    f'data-node="{row["id"]}" role="button" tabindex="{0 if row["on"] else -1}"'
                     + (' data-shortcut="1"' if row.get('link') else '')).on('click', handler).on(
-                    'keydown.enter', handler).on('keydown.space.prevent', handler):
+                    'keydown.enter', handler).on('keydown.space.prevent', space):
                 if tickable:
                     node_box(row['id'], row.get('count'))
                 with ui.element('div').classes('stp-name'):
@@ -2120,6 +2765,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
 
     def after_draw():
         body.client.run_javascript(_RESTORE_SCROLL_JS + _FIT_GRID_JS + _CRUMBS_END_JS
+                                   + _KEYS_JS + 'setTimeout(() => window.__stpKeys.fix(), 60);'
                                    + (_THUMBS_JS if vw['view'] == 'gallery' else '')
                                    + (_RESIZE_JS if vw['view'] == 'table' else ''))
 
