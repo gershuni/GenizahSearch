@@ -2090,12 +2090,10 @@ def init_api_routes(app_override=None):
         from shared.puzzle_image_service import (
             get_puzzle_image_service, normalize_request_params, STORED_SHARED,
         )
-        from shared.background_removal import remove_background
+        from shared.background_removal import MAX_UPLOAD_PIXELS, open_jpeg_or_png, remove_background
         from web.puzzle_tokens import verify_upload_token
         from web.puzzle_image_access import browser_key_for_request, signed_in_user_id
-        from PIL import Image as _PILImage
         from nicegui import run
-        import io as _io
 
         MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB
 
@@ -2155,8 +2153,7 @@ def init_api_routes(app_override=None):
             # thread, not on the event loop that serves every visitor.
             # Verify Pillow can open it (prevents crafted payloads)
             try:
-                img = _PILImage.open(_io.BytesIO(raw_bytes))
-                img.verify()
+                open_jpeg_or_png(raw_bytes, MAX_UPLOAD_PIXELS).verify()
             except Exception:
                 return Response(content="Corrupt image data", status_code=400)  # Request processing failed; return error response
 

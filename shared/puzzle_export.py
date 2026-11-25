@@ -27,6 +27,7 @@ from typing import Callable, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
+from shared.background_removal import open_jpeg_or_png
 from shared.puzzle_model import PuzzleFragment
 
 logger = logging.getLogger(__name__)
@@ -232,7 +233,7 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
             continue
 
         try:
-            export_img = Image.open(io.BytesIO(img_bytes)).convert('RGBA')
+            export_img = open_jpeg_or_png(img_bytes).convert('RGBA')
         except Exception as e:
             logger.warning("compose_puzzle_export: failed to open image for fl_id=%s: %s", frag.fl_id, e)
             continue

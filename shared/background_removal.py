@@ -23,6 +23,7 @@ Key design decisions:
 
 import io
 import logging
+import struct
 import numpy as np
 from PIL import Image, ImageFilter
 
@@ -32,6 +33,31 @@ DEFAULT_THRESHOLD = 30.0
 CORNER_SAMPLE_SIZE = 20
 MIN_FOREGROUND_RATIO = 0.05  # 5% -- small fragments on large backgrounds are valid
 LOW_SATURATION_THRESHOLD = 30  # S < 30 (on 0-255 scale) = low saturation
+
+# The formats the puzzle uses, and the largest image taken from a visitor: the
+# widest size preset (2000 px) by 20,000, so a long scroll still fits.
+IMAGE_FORMATS = ('JPEG', 'PNG')
+MAX_UPLOAD_PIXELS = 40_000_000
+_PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
+
+
+def open_jpeg_or_png(data: bytes, max_pixels: int = 0) -> Image.Image:
+    """Open ``data`` with Pillow's JPEG and PNG decoders only; nothing else is tried.
+
+    Raises for any other format, and ``ValueError`` when ``max_pixels`` is given
+    and the image is larger. A PNG's size is read from its header BEFORE Pillow
+    sees it: opening an animated PNG may already allocate the whole canvas.
+    """
+    if max_pixels and data[:8] == _PNG_SIGNATURE:
+        if len(data) < 24 or data[12:16] != b'IHDR':
+            raise ValueError('PNG without a leading IHDR chunk')
+        width, height = struct.unpack('>II', data[16:24])
+        if width * height > max_pixels:
+            raise ValueError(f'image too large: {width}x{height}')
+    img = Image.open(io.BytesIO(data), formats=IMAGE_FORMATS)
+    if max_pixels and img.width * img.height > max_pixels:
+        raise ValueError(f'image too large: {img.width}x{img.height}')
+    return img
 
 
 def detect_background_color(hsv_array: np.ndarray) -> np.ndarray:
@@ -118,7 +144,7 @@ def create_blue_mat_mask(hsv_array: np.ndarray) -> Image.Image:
         (s_chan >= BLUE_MAT_SAT_MIN)
     )
     mask_array = np.where(is_blue, 0, 255).astype(np.uint8)
-    mask_img = Image.fromarray(mask_array, mode='L')
+    mask_img = Image.fromarray(mask_array)
     mask_img = mask_img.filter(ImageFilter.MinFilter(3))   # erode noise
     mask_img = mask_img.filter(ImageFilter.MaxFilter(5))   # dilate foreground
     return mask_img
@@ -164,7 +190,7 @@ def create_mask(hsv_array: np.ndarray, bg_color: np.ndarray,
         diff = np.sqrt(np.sum((hsv_array.astype(float) - bg_color) ** 2, axis=2))
 
     mask_array = np.where(diff > threshold, 255, 0).astype(np.uint8)
-    mask_img = Image.fromarray(mask_array, mode='L')
+    mask_img = Image.fromarray(mask_array)
     mask_img = mask_img.filter(ImageFilter.MinFilter(3))   # erode noise
     mask_img = mask_img.filter(ImageFilter.MaxFilter(5))   # dilate foreground
     return mask_img
@@ -202,7 +228,7 @@ def remove_background(image_bytes: bytes,
         If removal would eliminate too many pixels (foreground < min_foreground_ratio),
         returns original as RGBA PNG (safety fallback).
     """
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    img = open_jpeg_or_png(image_bytes).convert('RGB')
     hsv_img = img.convert('HSV')
     hsv_array = np.array(hsv_img)
 

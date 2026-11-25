@@ -11,4 +11,4 @@
 # networkx [OK], python-louvain [OK], Brotli [OK]. No SUS/SLOP findings.
 networkx==3.6.1
 python-louvain==0.16
-Brotli==1.2.0
+Brotli==1.2.1
