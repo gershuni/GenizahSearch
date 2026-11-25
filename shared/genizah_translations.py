@@ -7037,3 +7037,12 @@ TRANSLATIONS.update({
     "Previous image": "תמונה קודמת",
     "Next image": "תמונה הבאה",
 })
+# The shelf picker's quick look (2026-11-25): one shelfmark's picture filling the picker (both apps)
+TRANSLATIONS.update({
+    "Quick look": "מבט מהיר",
+    "Previous shelfmark": "מספר המדף הקודם",
+    "Next shelfmark": "מספר המדף הבא",
+    "{n} of {total}": "{n} מתוך {total}",
+    "Chosen": "נבחר",
+    "Back to the list": "חזרה לרשימה",
+})

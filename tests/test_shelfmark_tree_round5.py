@@ -54,3 +54,12 @@ def test_an_image_is_found_in_the_list_by_its_nli_id_whatever_its_width():
     assert image_index(urls, 'https://iiif/FL12/full/800,/0/default.jpg') == 1
     assert image_index(urls, 'https://iiif/FL1/full/400,/0/default.jpg') is None     # not a prefix match
     assert image_index(urls, '') is None and image_index([], 'https://iiif/FL11') is None
+
+
+def test_a_microfilm_opens_on_its_middle_image_past_the_start_target_and_the_card():
+    # owner, 2026-11-25: the National Library of Russia's images begin with a START frame and a card
+    from shared.shelfmark_tree_details import opening_image
+    assert opening_image('RNL', 29) == 14 and opening_image('rnl ', 29) == 14
+    assert opening_image('RNL', 3) == 2 and opening_image('RNL', 4) == 2 and opening_image('RNL', 5) == 2
+    assert opening_image('RNL', 2) == 0 and opening_image('RNL', 1) == 0 and opening_image('RNL', 0) == 0
+    assert opening_image('CUL', 29) == 0 and opening_image('', 29) == 0

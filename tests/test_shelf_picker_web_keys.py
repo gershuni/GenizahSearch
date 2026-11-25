@@ -479,3 +479,172 @@ const { chromium } = require('playwright');
     run = subprocess.run([node, str(script), json.dumps(html)], capture_output=True, text=True, timeout=120)
     assert run.returncode == 0, run.stderr
     assert json.loads(run.stdout) == 'a1'
+
+
+_LOOK_PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>
+body { margin: 0; }
+.stp-look { width: 1000px; height: 760px; display: flex; flex-direction: column; }
+.stp-look-stage { width: 1000px; height: 700px; display: flex; align-items: center; justify-content: center; }
+.stp-d-zoom { width: fit-content; overflow: hidden; }
+.stp-d-zoom > img { display: block; max-width: 1000px; max-height: 700px; transform-origin: 0 0; }
+</style></head><body>
+<div class="stp-look" dir="DIR">
+  <div class="stp-look-bar">BUTTONS</div>
+  <div class="stp-look-stage"><div class="stp-d-zoom stp-look-zoom" id="c88"><img></div></div>
+</div>
+<script>
+window.log = [];
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-testid]');
+  if (t) window.log.push(t.dataset.testid);
+});
+</script>
+<script>ZOOM</script><script>LOOK</script>
+</body></html>"""
+
+_LOOK_IDS = ('shelf-look-prev', 'shelf-look-next', 'shelf-look-page-prev', 'shelf-look-page-next',
+             'shelf-look-rotate-left', 'shelf-look-rotate-right', 'shelf-look-zoom-out', 'shelf-look-zoom-in',
+             'shelf-look-choose', 'shelf-look-open', 'shelf-look-first', 'shelf-look-last', 'shelf-look-close')
+
+
+def test_the_quick_look_asks_for_the_window_s_width_and_its_keys_press_its_buttons(tmp_path):
+    from web.components.shelfmark_tree_picker import _LOOK_JS, _ZOOM_JS
+    node = _node_with_playwright()
+    if node is None:
+        pytest.skip("node with playwright is not installed")
+    buttons = ''.join(f'<button data-testid="{t}">{t}</button>' for t in _LOOK_IDS)
+    pages = {d: _LOOK_PAGE.replace('DIR', d).replace('BUTTONS', buttons).replace('ZOOM', _ZOOM_JS)
+             .replace('LOOK', _LOOK_JS) for d in ('ltr', 'rtl')}
+    picker = (_PAGE.replace('DIR', 'ltr').replace('ROWS1', _rows('a', 2, on=0)).replace('ROWS2', _rows('a0.', 2))
+              .replace('TILES', _tiles(3))
+              .replace('<button data-testid="shelf-zoom-out">',
+                       '<button data-testid="shelf-rotate-left">L</button><button data-testid="shelf-rotate-right">R'
+                       '</button><button data-testid="shelf-zoom-out">')
+              .replace('KEYS', _KEYS_JS))
+    script = tmp_path / 'look.js'
+    script.write_text(r"""
+const { chromium } = require('playwright');
+(async () => {
+  const [pages, picker] = JSON.parse(process.argv[2]);
+  const browser = await chromium.launch();
+  const out = {};
+  for (const [dir, html] of Object.entries(pages)) {
+    const page = await browser.newPage({viewport: {width: 1000, height: 760}});
+    const asked = [];
+    await page.route('http://img.test/**', (route) => {
+      asked.push(route.request().url().slice('http://img.test/'.length));
+      route.fulfill({contentType: 'image/svg+xml',
+                     body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"></svg>'});
+    });
+    await page.setContent(html);
+    await page.evaluate(() => window.__stpLook.show(88, 'http://img.test/low',
+      'http://img.test/p1?width=__W__', ['http://img.test/p2?width=__W__', 'http://img.test/n1?width=__W__'],
+      {fresh: true}));
+    await page.waitForFunction(() => (document.querySelector('#c88 img').getAttribute('src') || '').includes('p1'));
+    const src = await page.evaluate(() => document.querySelector('#c88 img').getAttribute('src'));
+    for (const key of ['ArrowRight', 'ArrowLeft', 'Control+ArrowRight', 'Shift+ArrowLeft', 'ArrowDown',
+                       'PageUp', 'Home', 'End', '+', '-', 'KeyR', 'Shift+KeyR', 'Space', 'Enter', 'KeyQ']) {
+      await page.keyboard.press(key);
+    }
+    out[dir] = {asked, src, log: await page.evaluate(() => window.log)};
+    await page.close();
+  }
+  const page = await browser.newPage();
+  await page.setContent(picker);
+  await page.waitForTimeout(60);
+  await page.evaluate(() => document.querySelector('.stp-card').addEventListener('stp-look',
+    (e) => window.log.push('look ' + e.detail)));
+  await page.focus('[data-leaf="t1"]');
+  await page.keyboard.press('KeyQ');
+  await page.keyboard.press('KeyR');
+  await page.keyboard.press('Shift+KeyR');
+  await page.keyboard.press('Shift+ArrowRight');
+  out.picker = await page.evaluate(() => window.log);
+  console.log(JSON.stringify(out));
+  await browser.close();
+})().catch((e) => { console.error(e); process.exit(1); });
+""", encoding='utf-8')
+    run = subprocess.run([node, str(script), json.dumps([pages, picker])], capture_output=True, text=True,
+                         timeout=180)
+    assert run.returncode == 0, run.stderr
+    out = json.loads(run.stdout)
+    for direction in ('ltr', 'rtl'):
+        seen = out[direction]
+        # 300 x 400 at hand, a box of 1000 x 700: fitted by its height, 525 wide, asked in a step of 200
+        assert seen['asked'][0] == 'low', direction
+        assert set(seen['asked'][1:]) == {'p1?width=600', 'p2?width=600', 'n1?width=600'}, direction
+        assert seen['src'] == 'http://img.test/p1?width=600', direction
+        nxt, prev = ('shelf-look-next', 'shelf-look-prev') if direction == 'ltr' else ('shelf-look-prev', 'shelf-look-next')
+        pnext, pprev = (('shelf-look-page-next', 'shelf-look-page-prev') if direction == 'ltr'
+                        else ('shelf-look-page-prev', 'shelf-look-page-next'))
+        assert seen['log'] == [nxt, prev, pnext, pprev, 'shelf-look-page-next', 'shelf-look-page-prev',
+                               'shelf-look-first', 'shelf-look-last', 'shelf-look-zoom-in', 'shelf-look-zoom-out',
+                               'shelf-look-rotate-right', 'shelf-look-rotate-left', 'shelf-look-choose',
+                               'shelf-look-open', 'shelf-look-close'], direction
+    assert out['picker'] == ['look t1', 'shelf-rotate-right', 'shelf-rotate-left', 'shelf-page-next']
+
+
+def test_the_quick_look_script_parses():
+    from web.components.shelfmark_tree_picker import _LOOK_JS
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('node is not installed')
+    out = subprocess.run([node, '--check', '-'], input=_LOOK_JS, text=True, capture_output=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+
+
+def test_the_quick_look_waits_with_a_spinner_and_never_shows_a_broken_picture(tmp_path):
+    # owner, 2026-11-25: a broken image showed for 3 seconds; the picture at hand blurred, a spinner, instead
+    from web.components.shelfmark_tree_picker import _CSS, _LOOK_JS, _ZOOM_JS
+    node = _node_with_playwright()
+    if node is None:
+        pytest.skip("node with playwright is not installed")
+    html = (_LOOK_PAGE.replace('</style>', '</style><style>' + _CSS + '</style>', 1)
+            .replace('DIR', 'ltr').replace('BUTTONS', '').replace('ZOOM', _ZOOM_JS).replace('LOOK', _LOOK_JS)
+            .replace('<div class="stp-look-stage">', '<div class="stp-look-stage" id="stage">'))
+    script = tmp_path / 'wait.js'
+    script.write_text(r"""
+const { chromium } = require('playwright');
+(async () => {
+  const [html] = JSON.parse(process.argv[2]);
+  const browser = await chromium.launch();
+  const page = await browser.newPage({viewport: {width: 1000, height: 760}});
+  let release;
+  const held = new Promise((r) => { release = r; });
+  await page.route('http://img.test/**', async (route) => {
+    const url = route.request().url();
+    if (url.includes('broken')) { route.fulfill({status: 404, body: ''}); return; }
+    if (url.includes('big')) await held;
+    route.fulfill({contentType: 'image/svg+xml',
+                   body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"></svg>'});
+  });
+  await page.setContent(html);
+  const state = () => page.evaluate(() => ({
+    wait: document.getElementById('stage').classList.contains('stp-look-wait'),
+    src: document.querySelector('#c88 img').getAttribute('src'),
+    hidden: getComputedStyle(document.querySelector('#c88')).visibility === 'hidden'}));
+  const out = {};
+  await page.evaluate(() => window.__stpLook.show(88, '', '', [], {fresh: true}));     // the list not known yet
+  await page.waitForTimeout(50);
+  out.opening = await state();
+  await page.evaluate(() => window.__stpLook.show(88, 'http://img.test/broken', 'http://img.test/big?width=__W__', [],
+                                                  {fresh: true}));
+  await page.waitForTimeout(150);
+  out.broken = await state();
+  release();
+  await page.waitForFunction(() => !document.getElementById('stage').classList.contains('stp-look-wait'));
+  out.done = await state();
+  await page.evaluate(() => window.__stpLook.show(88, '', '', [], {fresh: true, none: true}));
+  await page.waitForTimeout(50);
+  out.none = await state();
+  console.log(JSON.stringify(out));
+  await browser.close();
+})().catch((e) => { console.error(e); process.exit(1); });
+""", encoding='utf-8')
+    run = subprocess.run([node, str(script), json.dumps([html])], capture_output=True, text=True, timeout=120)
+    assert run.returncode == 0, run.stderr
+    out = json.loads(run.stdout)
+    assert out['opening'] == {'wait': True, 'src': None, 'hidden': True}
+    assert out['broken'] == {'wait': True, 'src': None, 'hidden': True}          # no broken picture, the spinner
+    assert out['done']['wait'] is False and 'big?width=' in out['done']['src'] and not out['done']['hidden']
+    assert out['none'] == {'wait': False, 'src': None, 'hidden': True}

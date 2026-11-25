@@ -44,13 +44,14 @@ import html
 import inspect
 import json
 import logging
+import re
 from typing import Any, Callable, Optional
 
 from nicegui import background_tasks, run, ui
 
 from shared.shelfmark_tree_columns import (NODE_ROWS, WIDE_COLUMNS, leaf_in_view, leaf_tooltip, load_view,
                                            passed_through, settle)
-from shared.shelfmark_tree_details import add_joins, field_lines, item_details
+from shared.shelfmark_tree_details import add_joins, field_lines, is_microfilm, item_details, opening_image
 from shared.shelfmark_tree_limits import chip_name, limit_for, refusal_message
 from shared.shelfmark_tree_rows import (
     COLUMNS, DETAILS_KEY, HEADER_TIPS, SIZE_LABELS, SIZES, STORAGE_KEY, choice_value, details_shown, folds_columns,
@@ -89,6 +90,35 @@ _CSS = """
 .stp-d-zoom.stp-zoomed:active { cursor: grabbing; }
 .stp-d-ibar { display: flex; align-items: center; gap: 2px; }
 .stp-d-ibar > .stp-d-pnav { flex: 1 1 auto; }
+/* the quick look (_LOOK_JS): one shelfmark's picture filling the window, its bar above it. A card lines its
+   children up at the start: here they stretch, the bar across, the picture's place under it */
+.stp-look { width: 100vw; max-width: 100vw !important; height: 100vh; max-height: 100vh !important; display: flex;
+  flex-direction: column; align-items: stretch !important; gap: 0; padding: 0 !important; border-radius: 0 !important; }
+.stp-look-bar { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; padding: 6px 12px;
+  border-bottom: 1px solid var(--border-light, #d5d8de); background: var(--bg-primary, #fff); }
+.stp-look-head, .stp-look-tools { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 2px; }
+.stp-look-tools { justify-content: flex-end; }
+.stp-look-mid { flex: 0 0 auto; }
+.stp-look-name { min-width: 0; display: flex; flex-direction: column; padding: 0 4px; line-height: 1.25; }
+.stp-look-title { font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stp-look-where, .stp-look-plabel { font-size: 12.5px; color: var(--text-secondary, #5b6270); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.stp-look-choose, .stp-look-act { margin-inline-start: 8px; }
+.stp-look-stage { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center;
+  overflow: hidden; padding: 12px; background: var(--bg-tertiary, #eef0f3); position: relative; }
+/* no picture yet: nothing drawn (never a broken image's frame); waiting: the picture at hand blurred, a
+   spinner over the place */
+.stp-look-zoom:has(> img:not([src])) { visibility: hidden; }
+.stp-look-zoom > img { transition: filter .25s; }
+.stp-look-wait .stp-look-zoom > img { filter: blur(3px); }
+.stp-look-spin { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none;
+  padding: 10px; border-radius: 50%; background: rgba(255, 255, 255, .8); pointer-events: none; }
+.stp-look-wait .stp-look-spin { display: block; }
+.stp-look-zoom { margin: 0; border-radius: 4px; box-shadow: 0 1px 6px rgba(0, 0, 0, .18); }
+/* its size set by _LOOK_JS (fitted to its place, the narrow first picture too); until then, within it */
+.stp-look-zoom > img { display: block; max-width: calc(100vw - 24px); max-height: calc(100vh - 90px); }
+.stp-look-none { font-size: 15px; color: var(--text-secondary, #5b6270); }
+.stp-look-off { display: none !important; }
 /* labelled fields, one under the other, each spotted by its label (round 4) */
 .stp-d-text { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .stp-d-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -367,6 +397,15 @@ _CSS = """
   overflow-wrap: anywhere; text-align: start; }
 .stp-tcap > .stp-c-name { flex: 1 1 auto; direction: ltr; unicode-bidi: isolate; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; min-width: 0; }
+/* the quick look on a phone: the bar on two lines, the images' arrows under the shelfmark (last: the
+   picker's own breakpoint is the first in this sheet) */
+@media (max-width: 700px) {
+  .stp-look-bar { flex-wrap: wrap; gap: 4px 8px; }
+  .stp-look-head { flex: 1 1 100%; }
+  .stp-look-mid { flex: 1 1 auto; }
+  .stp-look-tools { flex: 0 1 auto; }
+  .stp-look-choose .q-btn__content > span { display: none; }
+}
 """
 
 
@@ -469,14 +508,21 @@ def _title_of(sys_id: str) -> str:
         return ''
 
 
+#: Asks the NLI image route for the manuscript's middle image (``web/api.py::nli_image_by_sysid``).
+_MIDDLE = '&middle=1'
+
+
 def _thumbnail_src(sys_id: str, shelfmark: str, width: int = 320) -> str:
-    """The manuscript's first image, small, by the site's own image routes (``/api/nli_image_by_sysid``,
+    """The manuscript's first image (a microfilm's middle one, as the details open on: ``_MIDDLE``, which
+    the route works out from its own image list), small, by the site's own image routes (``/api/nli_image_by_sysid``,
     Oxford's, a provider's while NLI is down: ``web/components/candidate_grid.py::build_thumbnail_url``),
     never NLI's own address, as every thumbnail on the site; '' when there is none to ask for. Whether it
     exists is known when it loads: one that fails is hidden."""
     try:
         from web.components.candidate_grid import build_thumbnail_url
-        return build_thumbnail_url(sys_id, 1, shelfmark or '', _code_of(sys_id), width=width) or ''
+        code = _code_of(sys_id)
+        src = build_thumbnail_url(sys_id, 1, shelfmark or '', code, width=width) or ''
+        return src + _MIDDLE if is_microfilm(code) and src.startswith('/api/nli_image_by_sysid/') else src
     except Exception:   # noqa: BLE001 -- the pane without its image
         return ''
 
@@ -507,6 +553,46 @@ def _image_total(sys_id: str) -> int:
     except Exception:   # noqa: BLE001 -- the first image alone
         logger.debug("shelf picker: no image list for %s", sys_id, exc_info=True)
         return 0
+
+
+def _key_tip(text: str, key: str) -> str:
+    """A button's tooltip with its key (owner, 2026-11-25): "Zoom in (+)"."""
+    return f"{tr(text)} ({key})"
+
+
+def _arrow_keys(rtl: bool) -> tuple:
+    """The arrows' names (back, forward) as the keys go: mirrored in Hebrew."""
+    return ('\u2192', '\u2190') if rtl else ('\u2190', '\u2192')
+
+
+_WIDTH_PARAM = re.compile(r'([?&]width=)\d+')
+
+
+def _opening(sys_id: str) -> tuple:
+    """A manuscript's image count and the one its details and quick look open on (``opening_image``: its
+    first; a microfilm's middle one), by its own library code. BLOCKING: off the loop."""
+    total = _image_total(sys_id)
+    return total, opening_image(_code_of(sys_id), total)
+
+
+def _look_pages(sys_id: str, shelfmark: str, next_id: str = '', next_shelfmark: str = '',
+                low_width: int = 300) -> tuple:
+    """The quick look's addresses: each of the manuscript's images by the site's own image routes, with
+    ``__W__`` where its width goes (the browser fills it in: ``_LOOK_JS``); the one it opens on; that one
+    small (``low_width``: shown blurred while the large one comes; the tiles' address for a first image);
+    and the image the next shelfmark opens on. BLOCKING (the image lists, the routes): off the loop."""
+    def at(sid: str, name: str, page: int) -> str:
+        src = _page_src(sid, name, page, 400)
+        return _WIDTH_PARAM.sub(r'\g<1>__W__', src) if src else ''
+    total, start = _opening(sys_id)
+    pages = [at(sys_id, shelfmark, p) for p in range(1, max(1, total) + 1)]
+    pages = pages if any(pages) else []
+    low = _page_src(sys_id, shelfmark, start + 1, low_width) if pages else ''
+    nxt = ''
+    if next_id:
+        _total, nstart = _opening(next_id)
+        nxt = at(next_id, next_shelfmark, nstart + 1)
+    return pages, start, low, nxt
 
 
 def _page_src(sys_id: str, shelfmark: str, page: int, width: int) -> str:
@@ -587,8 +673,12 @@ window.__stpZoom = window.__stpZoom || {
     const img = box.querySelector('img');
     if (!img || box.__z.z <= 1 || img.dataset.sharp === img.getAttribute('src')) return;
     const src = img.getAttribute('src') || '';
-    if (!/[?&]width=\\d+/.test(src)) return;
-    const sharp = src.replace(/([?&]width=)\\d+/, '$11200');
+    const has = src.match(/[?&]width=(\\d+)/);
+    if (!has) return;
+    // 1,200 pixels (the pane's); the quick look's, already that wide, twice its width up to the routes' 2,000
+    const now = +has[1], want = Math.max(1200, Math.min(2000, Math.ceil(now * 2 / 200) * 200));
+    if (want <= now) return;
+    const sharp = src.replace(/([?&]width=)\\d+/, '$1' + want);
     const pre = new Image();
     pre.onload = () => { if (img.getAttribute('src') === src) { img.src = sharp; img.dataset.sharp = sharp; } };
     pre.src = sharp;
@@ -609,7 +699,155 @@ window.__stpZoom = window.__stpZoom || {
     box.__z.z = 1;
     this.apply(box);
   },
+  clear(id) {
+    // another shelfmark: fitted and upright
+    const box = this.box(id);
+    if (!box || !box.__z) return;
+    box.__z.z = 1;
+    box.__z.r = 0;
+    this.apply(box);
+  },
 };
+"""
+
+
+#: The quick look (owner, 2026-11-25): one shelfmark's picture filling the window. ``show(id, low, page,
+#: ahead)``: ``id`` the zoom box's element id, ``low`` a picture at hand shown at once ('' none), ``page``
+#: the image's address with ``__W__`` for its width, asked for at the width that fills the window
+#: (``shared.shelfmark_tree_details.look_width``: in steps, 400 to 1,600) and put in place when it has come;
+#: ``ahead`` addresses fetched at that width before they are asked for (the next image, the next shelfmark's).
+#: Its keys while it is open: the arrows the list's shelfmarks (mirrored in Hebrew), Shift or Ctrl + an arrow, Up /
+#: Down and PgUp / PgDn the images, Home / End, + / - / 0, R / Shift+R, Space, Enter, Q (Esc: the dialog's own)
+#: -- each the bar's button (by the key: a Hebrew layout types ק and ר).
+_LOOK_JS = """
+window.__stpLook = window.__stpLook || (() => {
+  const L = {
+    STEP: 200, MIN: 400, MAX: 1600,
+    width(stage, aspect) {
+      const r = window.devicePixelRatio || 1, a = aspect > 0 ? aspect : 0.75;
+      const fit = Math.min(stage.clientWidth * r, stage.clientHeight * r * a);
+      return Math.max(this.MIN, Math.min(this.MAX, Math.ceil(fit / this.STEP) * this.STEP));
+    },
+    show(id, low, page, ahead, opts, tries) {
+      // opts.fresh: another shelfmark (fitted, upright: the turn of the pane's box opts.like when given)
+      const box = document.getElementById('c' + id);
+      if (!box) {
+        // the dialog's contents are drawn once it opens: a moment later
+        if ((tries || 0) < 80) setTimeout(() => this.show(id, low, page, ahead, opts, (tries || 0) + 1), 25);
+        return;
+      }
+      const img = box.querySelector('img'), stage = box.parentElement, o = opts || {};
+      if (!box.__fit) {
+        // the picture fitted to its place, the narrow first one too (it shows larger, then sharper)
+        box.__fit = true;
+        img.addEventListener('load', () => this.fit(box));
+        window.addEventListener('resize', () => { if (box.isConnected) this.fit(box); });
+      }
+      if (window.__stpZoom) {
+        window.__stpZoom.init(id);
+        if (o.fresh) {
+          box.__z.z = 1;
+          box.__z.r = 0;
+          const like = o.like ? document.getElementById('c' + o.like) : null;
+          if (like && like.__z) box.__z.r = like.__z.r;
+          window.__stpZoom.apply(box);
+        }
+      }
+      img.dataset.want = page || '';
+      // waiting (the spinner, the picture at hand blurred): until the picture asked for has come; with
+      // nothing to ask for (o.none: no image) never; a new shelfmark whose list is not known yet: until it is
+      const wait = (on) => stage.classList.toggle('stp-look-wait', !!on);
+      wait(page ? true : (o.fresh && !o.none));
+      const ratio = () => (img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 0);
+      const sized = (aspect) => {
+        if (!page || img.dataset.want !== page) return;
+        const w = this.width(stage, aspect), url = page.split('__W__').join(String(w));
+        box.dataset.width = String(w);
+        (ahead || []).forEach((t) => { if (t) (new Image()).src = t.split('__W__').join(String(w)); });
+        if (img.getAttribute('src') === url) { wait(false); return; }
+        const pre = new Image();
+        pre.onload = () => {
+          if (img.dataset.want !== page) return;
+          img.src = url;
+          delete img.dataset.sharp;
+          wait(false);
+          if (box.__z && window.__stpZoom) window.__stpZoom.apply(box);
+        };
+        pre.onerror = () => { if (img.dataset.want === page) wait(false); };
+        pre.src = url;
+      };
+      if (low && img.getAttribute('src') !== low) {
+        // never a broken picture: one that does not come leaves the place empty, the spinner on it
+        img.onload = () => { img.onload = null; img.onerror = null; sized(ratio()); };
+        img.onerror = () => { img.onload = null; img.onerror = null; img.removeAttribute('src'); sized(0); };
+        img.src = low;
+      } else if (!low && o.fresh) {
+        img.removeAttribute('src');
+        sized(0);
+      } else if (img.getAttribute('src') && !img.complete) {
+        img.onload = () => { img.onload = null; sized(ratio()); };
+      } else {
+        sized(ratio());
+      }
+    },
+    fit(box) {
+      const img = box.querySelector('img'), stage = box.parentElement;
+      if (!img || !img.naturalWidth || !img.naturalHeight) return;
+      const cs = getComputedStyle(stage);
+      const aw = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const ah = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      const a = img.naturalWidth / img.naturalHeight, w = Math.max(1, Math.floor(Math.min(aw, ah * a)));
+      img.style.maxWidth = 'none';
+      img.style.maxHeight = 'none';
+      img.style.width = w + 'px';
+      img.style.height = Math.round(w / a) + 'px';
+      if (box.__z && window.__stpZoom) window.__stpZoom.apply(box);
+    },
+    card() {
+      const c = Array.from(document.querySelectorAll('.stp-look')).find((el) => el.offsetParent !== null);
+      return c || null;
+    },
+    click(card, testid) {
+      const el = card.querySelector(`[data-testid="${testid}"]`);
+      if (el && !el.disabled && !el.classList.contains('disabled')) el.click();
+    },
+    key(e) {
+      const card = this.card();
+      if (!card) return;
+      const rtl = card.getAttribute('dir') === 'rtl', ctrl = e.ctrlKey || e.metaKey;
+      const fwd = rtl ? 'ArrowLeft' : 'ArrowRight', bwd = rtl ? 'ArrowRight' : 'ArrowLeft';
+      let id = null;
+      if (e.altKey) return;
+      if (e.key === fwd || e.key === bwd) {
+        id = (ctrl || e.shiftKey) ? (e.key === fwd ? 'shelf-look-page-next' : 'shelf-look-page-prev')
+                  : (e.key === fwd ? 'shelf-look-next' : 'shelf-look-prev');
+      } else if (ctrl) {
+        return;
+      } else if (e.key === 'ArrowDown' || e.key === 'PageDown') id = 'shelf-look-page-next';
+      else if (e.key === 'ArrowUp' || e.key === 'PageUp') id = 'shelf-look-page-prev';
+      else if (e.key === 'Home') id = 'shelf-look-first';
+      else if (e.key === 'End') id = 'shelf-look-last';
+      else if (e.key === '+' || e.key === '=') id = 'shelf-look-zoom-in';
+      else if (e.key === '-') id = 'shelf-look-zoom-out';
+      else if (e.key === '0') {
+        const box = card.querySelector('.stp-look-zoom');
+        if (box && window.__stpZoom) window.__stpZoom.reset(box.id.slice(1));
+        e.preventDefault(); e.stopPropagation();
+        return;
+      } else if (e.code === 'KeyR') id = e.shiftKey ? 'shelf-look-rotate-left' : 'shelf-look-rotate-right';
+      else if (e.key === ' ') id = 'shelf-look-choose';
+      else if (e.key === 'Enter') id = 'shelf-look-open';
+      else if (e.code === 'KeyQ' && !e.shiftKey) id = 'shelf-look-close';
+      else if (e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); return; }
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.click(card, id);
+    },
+  };
+  window.addEventListener('keydown', (e) => L.key(e), true);
+  return L;
+})();
 """
 
 
@@ -867,7 +1105,8 @@ window.__stpKeys = window.__stpKeys || (() => {
         if (to && this.items(to).length) { e.preventDefault(); this.focus(to); }
         return;
       }
-      if (ctrl && !e.altKey && (e.key === fwd || e.key === bwd)) {
+      if ((ctrl || e.shiftKey) && !e.altKey && (e.key === fwd || e.key === bwd)) {
+        // Shift or Ctrl + an arrow: the pane's previous / next image (owner, 2026-11-25: Shift too)
         e.preventDefault();
         if (this.paneShown(card)) this.click(card, e.key === fwd ? 'shelf-page-next' : 'shelf-page-prev');
         return;
@@ -885,6 +1124,18 @@ window.__stpKeys = window.__stpKeys || (() => {
         return;
       }
       if (this.viewKey(card, e, item)) { e.preventDefault(); return; }
+      if (e.code === 'KeyQ' && !e.shiftKey) {
+        // Q: the quick look on the shelfmark the keyboard is on (the server's, by its placement)
+        e.preventDefault();
+        if (item.hasAttribute('data-leaf')) item.dispatchEvent(new CustomEvent('stp-look', {detail: item.dataset.leaf, bubbles: true}));
+        return;
+      }
+      if (e.code === 'KeyR') {
+        // R / Shift+R: the pane's picture turned a quarter, as its buttons
+        e.preventDefault();
+        if (this.paneShown(card)) this.click(card, e.shiftKey ? 'shelf-rotate-left' : 'shelf-rotate-right');
+        return;
+      }
       if (e.code === 'KeyS' && !e.shiftKey) {
         // S: "Open more than one" on or off (by the key: a Hebrew layout types ד there)
         e.preventDefault();
@@ -1506,7 +1757,7 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
     with container:
         ui.add_css(_CSS)
         with ui.dialog() as dialog, ui.card().classes('stp-card').props(
-                f'dir={"rtl" if is_rtl() else "ltr"} data-testid="shelf-picker"'):
+                f'dir={"rtl" if is_rtl() else "ltr"} data-testid="shelf-picker"') as card_el:
             with ui.row().classes('w-full items-center justify-between no-wrap'):
                 h3(title or tr('Pick from the shelf'), classes='text-lg font-semibold m-0')
                 ui.element('div').style('flex: 1 1 auto;')
@@ -1870,12 +2121,19 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
                                                      ('rotate_right', 90, 'Rotate right', 'shelf-rotate-right')):
                         ui.button(icon=icon, on_click=lambda _e=None, d=degrees, z=zoom_box: _run_js(
                             z, f'window.__stpZoom && __stpZoom.rotate({z.id}, {d});')).props(
-                            f'flat round dense size=sm aria-label="{_attr(tr(tip))}" data-testid="{test}"').tooltip(tr(tip))
+                            f'flat round dense size=sm aria-label="{_attr(tr(tip))}" data-testid="{test}"').tooltip(
+                            _key_tip(tip, 'Shift+R' if degrees < 0 else 'R'))
                     for icon, factor, tip, test in (('zoom_out', 0.8, 'Zoom out', 'shelf-zoom-out'),
                                                     ('zoom_in', 1.25, 'Zoom in', 'shelf-zoom-in')):
                         ui.button(icon=icon, on_click=lambda _e=None, f=factor, z=zoom_box: _run_js(
                             z, f'window.__stpZoom && __stpZoom.by({z.id}, {f});')).props(
-                            f'flat round dense size=sm aria-label="{_attr(tr(tip))}" data-testid="{test}"').tooltip(tr(tip))
+                            f'flat round dense size=sm aria-label="{_attr(tr(tip))}" data-testid="{test}"').tooltip(
+                            _key_tip(tip, '+' if factor > 1 else '-'))
+                    # the quick look: this shelfmark filling the window, at this page and turn (Q from a list)
+                    ui.button(icon='fullscreen', on_click=lambda _e=None, lf=leaf, z=zoom_box: open_look(
+                        lf, pane['page'], z.id)).props(
+                        f'flat round dense size=sm aria-label="{_attr(tr("Quick look"))}" '
+                        'data-testid="shelf-quick-look"').tooltip(f"{tr('Quick look')} (Q)")
             # set as values, not parsed from a props string (which keeps an escaped "&amp;" as it is)
             img.props.update({'src': url, 'alt': info['shelfmark'], 'loading': 'lazy', 'draggable': 'false'})
             img.update()
@@ -1897,28 +2155,36 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
     async def load_pages(gen: int, holder, leaf, info: dict, first: str):
         """The manuscript's other images: previous / next under its picture and where it is ("2 of 6"),
         when it has more than one; the next one asked of the browser before it is wanted."""
-        total = await run.io_bound(_image_total, leaf.sys_id)
+        total, start = await run.io_bound(_opening, leaf.sys_id)
         if gen != pane['gen'] or holder.is_deleted or total < 2:
             return
         name = leaf.shelfmark or leaf.label
         width = _THUMB_WIDTH['m']
-        pane['pages'] = [first] + [_page_src(leaf.sys_id, name, p, width) for p in range(2, total + 1)]
-        pane['page'] = 0
+        start = start if 0 <= start < total else 0
+        shown = start if _MIDDLE in first else 0   # which of the images the one on show (the tile's) is
+        pages = [_page_src(leaf.sys_id, name, p, width) for p in range(1, total + 1)]
+        pages[shown] = first
+        pane['pages'], pane['page'] = pages, shown
+        if start != shown and pane['img'] is not None and not pane['img'].is_deleted:
+            # a microfilm opens on its middle image (opening_image): past the START target and the card
+            pane['page'] = start
+            pane['img'].props['src'] = pages[start]
+            pane['img'].update()
         rtl = is_rtl()
         with holder:
             with ui.element('div').classes('stp-d-pnav').props('data-testid="shelf-details-pages"') as nav:
                 prev_btn = ui.button(icon='chevron_right' if rtl else 'chevron_left',
                                      on_click=lambda: step_page(-1)).props(
                     f'flat round dense size=sm aria-label="{_attr(tr("Previous image"))}" '
-                    'data-testid="shelf-page-prev"')
+                    'data-testid="shelf-page-prev"').tooltip(_key_tip('Previous image', f'Shift+{_arrow_keys(rtl)[0]}'))
                 where = ui.label('').props('aria-live="polite"')
                 next_btn = ui.button(icon='chevron_left' if rtl else 'chevron_right',
                                      on_click=lambda: step_page(1)).props(
                     f'flat round dense size=sm aria-label="{_attr(tr("Next image"))}" '
-                    'data-testid="shelf-page-next"')
+                    'data-testid="shelf-page-next"').tooltip(_key_tip('Next image', f'Shift+{_arrow_keys(rtl)[1]}'))
         pane['nav'] = (nav, prev_btn, where, next_btn)
         draw_page_nav()
-        prefetch_page(1)
+        prefetch_page(pane['page'] + 1)
 
     def draw_page_nav():
         nav = pane['nav']
@@ -1951,6 +2217,263 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
             _run_js(zoom_box, f'window.__stpZoom && __stpZoom.reset({zoom_box.id});')
         draw_page_nav()
         prefetch_page(page + step)
+
+    # -- the quick look (owner, 2026-11-25): one shelfmark's picture filling the window ---------------
+
+    look = {'dlg': None, 'leaf': None, 'gen': 0, 'pages': [], 'page': 0, 'next': '', 'parts': None,
+            'for_pick': False}
+
+    def look_rows() -> list:
+        """The shelfmarks of the list under the quick look, in its order (its rows drawn so far)."""
+        return [r['leaf'] for r in (st.get('leaves') or {}).get('rows') or () if r.get('leaf') is not None]
+
+    def look_at() -> int:
+        leaf = look['leaf']
+        return next((i for i, lf in enumerate(look_rows()) if leaf is not None and lf.id == leaf.id), -1)
+
+    def build_look():
+        """The quick look's dialog, once a picker: built when first asked for."""
+        rtl = is_rtl()
+
+        back, forward = _arrow_keys(rtl)
+
+        def tool(icon: str, tip: str, test: str, handler, classes: str = '', key: str = ''):
+            button = ui.button(icon=icon, on_click=handler).props(
+                f'flat round dense aria-label="{_attr(tr(tip) if tip else "")}" data-testid="{test}"').classes(classes)
+            if tip and 'stp-look-off' not in classes:
+                button.tooltip(_key_tip(tip, key) if key else tr(tip))
+            return button
+
+        def zoom_js(code: str):
+            box = look['parts']['box'] if look['parts'] else None
+            if box is not None and not box.is_deleted:
+                _run_js(box, 'window.__stpZoom && ' + code.replace('ID', str(box.id)))
+
+        with container:
+            with ui.dialog().props('maximized') as dlg, ui.card().classes('stp-look').props(
+                    f'dir={"rtl" if rtl else "ltr"} data-testid="shelf-look"'):
+                # the bar in three groups: back to the list and the shelfmark with its arrows (the start side),
+                # its images (the middle), the picture's tools and the choice (the end side)
+                with ui.element('div').classes('stp-look-bar'):
+                    with ui.element('div').classes('stp-look-head'):
+                        tool('close', 'Back to the list', 'shelf-look-close', dlg.close, key='Esc')
+                        prev_btn = tool('chevron_right' if rtl else 'chevron_left', 'Previous shelfmark',
+                                        'shelf-look-prev', lambda: look_step(-1), key=back)
+                        with ui.element('div').classes('stp-look-name'):
+                            title = ui.label('').classes('stp-look-title').props('dir="auto"')
+                            where = ui.label('').classes('stp-look-where')
+                        next_btn = tool('chevron_left' if rtl else 'chevron_right', 'Next shelfmark',
+                                        'shelf-look-next', lambda: look_step(1), key=forward)
+                    with ui.element('div').classes('stp-look-mid'):
+                        with ui.element('div').classes('stp-d-pnav') as pnav:
+                            page_prev = tool('chevron_right' if rtl else 'chevron_left', 'Previous image',
+                                             'shelf-look-page-prev', lambda: look_page(-1), key=f'Shift+{back}')
+                            page_label = ui.label('').classes('stp-look-plabel').props('aria-live="polite"')
+                            page_next = tool('chevron_left' if rtl else 'chevron_right', 'Next image',
+                                             'shelf-look-page-next', lambda: look_page(1), key=f'Shift+{forward}')
+                    with ui.element('div').classes('stp-look-tools'):
+                        tool('rotate_left', 'Rotate left', 'shelf-look-rotate-left',
+                             lambda: zoom_js('__stpZoom.rotate(ID, -90);'), key='Shift+R')
+                        tool('rotate_right', 'Rotate right', 'shelf-look-rotate-right',
+                             lambda: zoom_js('__stpZoom.rotate(ID, 90);'), key='R')
+                        tool('zoom_out', 'Zoom out', 'shelf-look-zoom-out', lambda: zoom_js('__stpZoom.by(ID, 0.8);'),
+                             key='-')
+                        tool('zoom_in', 'Zoom in', 'shelf-look-zoom-in', lambda: zoom_js('__stpZoom.by(ID, 1.25);'),
+                             key='+')
+                        # several at once: the shelfmark's box; one: Space chooses it (this button, hidden) and
+                        # the picker's own button takes it
+                        choose_btn = ui.button(tr('Chosen'), icon=_BOX['none'], on_click=lambda: look_choose()).props(
+                            'flat dense no-caps data-testid="shelf-look-choose"').classes('stp-look-choose')
+                        open_btn = ui.button('', on_click=lambda: look_open()).props(
+                            'unelevated dense no-caps color=primary data-testid="shelf-look-open"').classes(
+                            'stp-look-act')
+                        tool('first_page', '', 'shelf-look-first', lambda: look_go(0), 'stp-look-off')
+                        tool('last_page', '', 'shelf-look-last', lambda: look_go(-1), 'stp-look-off')
+                with ui.element('div').classes('stp-look-stage'):
+                    with ui.element('div').classes('stp-d-zoom stp-look-zoom').props(
+                            'data-testid="shelf-look-zoom"') as box:
+                        # its address is the browser's (_LOOK_JS), never set here: an update from here
+                        # would put back an old one
+                        ui.element('img').props('draggable=false')
+                    ui.spinner(size='42px').classes('stp-look-spin')
+                    none = ui.label(tr('No image')).classes('stp-look-none')
+                    none.set_visibility(False)
+            # closed by Esc, its button, Q or a click outside (the value: a close made here fires it too)
+            dlg.on_value_change(lambda e: None if e.value else background_tasks.create(
+                look_closed(), name='shelf-picker-look-closed'))
+        look['dlg'] = dlg
+        look['parts'] = {'prev': prev_btn, 'next': next_btn, 'title': title, 'where': where, 'pnav': pnav,
+                         'page_prev': page_prev, 'page_label': page_label, 'page_next': page_next,
+                         'choose': choose_btn, 'open': open_btn, 'box': box, 'none': none}
+        _run_js(box, _ZOOM_JS + _LOOK_JS)
+
+    def look_draw_bar():
+        parts, leaf = look['parts'], look['leaf']
+        rows, at = look_rows(), look_at()
+        parts['title'].set_text(leaf.shelfmark or leaf.label or leaf.sys_id)
+        # past the list's ends the arrows go on in the shelf's order (look_step): its group's name instead
+        parts['where'].set_text(tr('{n} of {total}').format(n=f"{at + 1:,}", total=f"{len(rows):,}")
+                                if at >= 0 else look.get('group', ''))
+        look_draw_nav()
+        look_sync()
+
+    def look_draw_nav():
+        parts, total, page = look['parts'], len(look['pages']), look['page']
+        parts['pnav'].set_visibility(total > 1)
+        parts['page_label'].set_text(tr('Image {n} of {total}').format(n=page + 1, total=total))
+        parts['page_prev'].set_enabled(page > 0)
+        parts['page_next'].set_enabled(page < total - 1)
+
+    def look_sync():
+        """The box (several at once: ticked as the lists have it) or the picker's own button (one)."""
+        parts, leaf = look['parts'], look['leaf']
+        choose = parts['choose']
+        if multi:
+            ticked = leaf is not None and leaf.sys_id in ((ms['state'] or {}).get('chosen') or ())
+            choose.props(f'icon={_BOX["all" if ticked else "none"]} aria-pressed="{"true" if ticked else "false"}"')
+            choose.classes(remove='stp-look-off')
+        else:
+            choose.classes(add='stp-look-off')
+        parts['open'].set_text(words['multi' if multi else 'single'])
+
+    def look_js(low: str, fresh: bool = False, like: Optional[int] = None, none: bool = False):
+        """The page shown asked of the browser at the window's width (``_LOOK_JS``), the next ones ahead."""
+        box, pages, page = look['parts']['box'], look['pages'], look['page']
+        if box.is_deleted:
+            return
+        ahead = ([pages[page + 1]] if page + 1 < len(pages) else []) + ([look['next']] if look['next'] else [])
+        opts = {'fresh': fresh, 'like': like, 'none': none}
+        _run_js(box, f'window.__stpLook && __stpLook.show({box.id}, {json.dumps(low)}, '
+                     f'{json.dumps(pages[page] if pages else "")}, {json.dumps(ahead)}, {json.dumps(opts)});')
+
+    async def look_show(leaf, page: Optional[int] = None, like: Optional[int] = None):
+        """Show ``leaf``: the picture at hand at once, blurred (from the pane: its page and turn; else the
+        tile's), its images' list off the loop, then the page at the window's width: ``page``, else the one
+        it opens on (``opening_image``: a microfilm's middle). A newer step wins."""
+        look['gen'] = gen = look['gen'] + 1
+        look.update(leaf=leaf, pages=[], page=page or 0, next='')
+        look_draw_bar()
+        parts = look['parts']
+        parts['none'].set_visibility(False)
+        from_pane = like is not None and page is not None and page < len(pane['pages'])
+        low = (pane['pages'][page] if from_pane else known_thumb_url(leaf.sys_id)) or ''
+        look_js(low, fresh=True, like=like)
+        rows, at = look_rows(), look_at()
+        nxt = rows[at + 1] if 0 <= at < len(rows) - 1 else None
+        pages, start, small, open_next = await run.io_bound(
+            _look_pages, leaf.sys_id, leaf.shelfmark or leaf.label,
+            nxt.sys_id if nxt is not None else '', (nxt.shelfmark or nxt.label) if nxt is not None else '',
+            _THUMB_WIDTH[vw['size']])
+        if gen != look['gen'] or parts['box'].is_deleted:
+            return
+        if not pages:
+            parts['none'].set_visibility(True)
+            look_js('', none=True)
+            return
+        page = min(page, len(pages) - 1) if page is not None else start
+        look.update(pages=pages, page=page, next=open_next)
+        look_draw_nav()
+        # the picture at hand: the pane's page, else the tile's when it is this page, else this page small
+        look_js(low if (from_pane or (low and page == (start if _MIDDLE in low else 0))) else small)
+
+    async def open_look(leaf, page: Optional[int] = None, like: Optional[int] = None):
+        if leaf is None or dialog.is_deleted:
+            return
+        if look['dlg'] is None:
+            build_look()
+        look['for_pick'] = False
+        look['dlg'].open()
+        await look_show(leaf, page, like)
+
+    async def look_by_row(e):
+        """Q on a row of the shelfmarks (``_KEYS_JS``): the quick look on it."""
+        leaf_id = e.args.get('detail') if isinstance(e.args, dict) else e.args
+        leaf = next((lf for lf in look_rows() if lf.id == leaf_id), None)
+        zoom_box = pane.get('zoom')
+        if (leaf is not None and pane['leaf'] is not None and pane['leaf'].id == leaf.id and pane['pages']
+                and zoom_box is not None and not zoom_box.is_deleted):
+            await open_look(leaf, pane['page'], zoom_box.id)     # the pane's: at its page and turn
+        else:
+            await open_look(leaf)
+
+    async def look_step(step: int):
+        """The list's previous / next shelfmark; past its ends (or once outside it), the shelf's previous /
+        next manuscript, into the next or previous group (owner, 2026-11-25)."""
+        rows, at = look_rows(), look_at()
+        if 0 <= at + step < len(rows) and at >= 0:
+            await look_show(rows[at + step])
+            return
+        leaf, gen = look['leaf'], look['gen']
+        if leaf is None:
+            return
+
+        def neighbour():
+            pair = service.neighbours(leaf.id)
+            target = pair[1 if step > 0 else 0]
+            node = service.node(target.node_id) if target is not None else None
+            return target, (display_name(node, lang) if node is not None else '')
+        target, group = await run.io_bound(neighbour)
+        if target is not None and gen == look['gen'] and not dialog.is_deleted:
+            look['group'] = group
+            await look_show(target)
+
+    async def look_go(index: int):
+        rows = look_rows()
+        if rows:
+            await look_show(rows[index if index >= 0 else len(rows) - 1])
+
+    def look_page(step: int):
+        pages = look['pages']
+        page = max(0, min(len(pages) - 1, look['page'] + step))
+        if not pages or page == look['page']:
+            return
+        look['page'] = page
+        look_draw_nav()
+        box = look['parts']['box']
+        _run_js(box, f'window.__stpZoom && __stpZoom.reset({box.id});')      # another page opens fitted
+        look_js('')
+
+    async def look_choose():
+        """Space / the box: the single choice chooses it (as a click); several at once tick it."""
+        leaf = look['leaf']
+        if leaf is None:
+            return
+        if multi:
+            await tick(leaf)
+        else:
+            await select(leaf)
+        look_sync()
+
+    async def look_open():
+        """Enter / the button: as Enter in the list (one: the picker's button; several: Open)."""
+        leaf = look['leaf']
+        if leaf is None:
+            return
+        look['for_pick'] = True
+        look['dlg'].close()
+        if multi:
+            await enter_several(leaf)
+        else:
+            one['leaf'] = leaf
+            await pick_selected()
+
+    async def look_closed():
+        """Back to the list at the shelfmark looked at last, chosen as a click chooses it (several at once:
+        shown in the pane), the keyboard on its row."""
+        leaf = look['leaf']
+        look['gen'] += 1
+        if look['for_pick'] or leaf is None or dialog.is_deleted:
+            return
+        if look_at() < 0:
+            await reveal(leaf.id)                   # past the list: the picker goes to its group, chosen there
+            return
+        if multi:
+            if pane['leaf'] is None or pane['leaf'].id != leaf.id:
+                background_tasks.create(show_details(leaf), name='shelf-picker-details')
+        elif one['leaf'] is None or one['leaf'].id != leaf.id:
+            await select(leaf)
+        _run_js(body, 'const K = window.__stpKeys; if (K) { K.pending = {kind: "leaves", at: Date.now(), '
+                      f'old: null, leaf: {json.dumps(leaf.id)}}}; setTimeout(() => K.fix(), 30); }}')
 
     async def reveal(sys_id: str):
         """A join's link: the dialog goes to that shelfmark, which is shown in its column and
@@ -2882,6 +3405,8 @@ def open_shelf_picker(container, service, on_pick: Optional[Callable[[dict], Any
                 _IN_LIST_JS + f'setTimeout(() => window.__stpInList('
                 f'document.querySelector(\'[data-leaf="{st["highlight"]}"]\'), true), 50)')
         await refresh()
+
+    card_el.on('stp-look', look_by_row, ['detail'])
 
     async def begin():
         if multi or both:

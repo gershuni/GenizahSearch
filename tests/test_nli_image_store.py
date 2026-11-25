@@ -482,3 +482,55 @@ class TestProxyRouteCacheHeaders:
         assert stand_in.status_code == 200 and stand_in.headers['cache-control'] == 'no-store'
         # Page 2 has its own FL id and NLI did not deliver it: not page 0's image.
         assert missing.status_code == 404 and missing.headers['cache-control'] == 'no-store'
+
+    def test_the_middle_image_is_worked_out_from_the_list_and_kept(self, client):
+        import web.api as api
+        http, _seam = client
+        nli = _FakeNli({SID: ['961', '962', '963', '964', '965']}, iiif_ok=['963'])
+        p1, p2 = nli.patches()
+        with p1, p2:
+            middle = http.get(f'/api/nli_image_by_sysid/{SID}?page=0&width=300&middle=1')
+            first = http.get(f'/api/nli_image_by_sysid/{SID}?page=0&width=300')
+        assert middle.status_code == 200 and middle.content == JPEG       # 963 alone is given: the middle
+        assert middle.headers['cache-control'] == f'public, max-age={api.IMAGE_HTTP_MAX_AGE}'
+        assert first.status_code == 404 and nli.manifest_calls == 1       # the list is read once
+
+    def test_the_middle_of_a_list_that_is_not_the_whole_one_is_not_kept(self, client):
+        http, _seam = client
+        nli = _FakeNli({}, iiif_ok=['971'], marc={SID: ['971']})
+        p1, p2 = nli.patches()
+        with p1, p2:
+            got = http.get(f'/api/nli_image_by_sysid/{SID}?middle=1&width=300')
+        assert got.status_code == 200 and got.headers['cache-control'] == 'no-store'
+
+    def test_a_refusal_is_not_an_nli_outage(self, client):
+        import shared.nli_circuit_breaker as breaker
+        _http, routes_seam = client
+        nli = _FakeNli({SID: ['981', '982', '983', '984', '985']})
+        refusal = b'<error>\n    <parameter>unauthorized</parameter>\n</error>'
+
+        def get(url, *a, **kw):
+            return nli.get(url) if url.endswith('/manifest') else _Resp(500, 'text/xml', body[0])
+        for body, opened in (([refusal], False), ([b'<error/>'], True)):
+            with patch('shared.puzzle_image_service.get_with_checked_redirects', side_effect=get), \
+                    patch('web.api.nli_image_get', side_effect=nli.rosetta):
+                for page in range(4):
+                    assert routes_seam['_fetch_nli_image_bytes'](SID, page) is None
+            assert breaker.is_open() is opened
+
+    def test_rosetta_s_refusal_is_not_an_nli_outage_either(self, client):
+        import shared.nli_circuit_breaker as breaker
+        http, routes_seam = client
+        nli = _FakeNli({SID: ['991', '992', '993', '994', '995']})
+        refused = _Resp(500, 'text/xml', b'<error><parameter>unauthorized</parameter></error>')
+
+        def get(url, *a, **kw):
+            return nli.get(url) if url.endswith('/manifest') else refused
+        with patch('shared.puzzle_image_service.get_with_checked_redirects', side_effect=get), \
+                patch('web.api.nli_image_get', side_effect=lambda *a, **kw: refused):
+            for page in range(4):
+                assert routes_seam['_fetch_nli_image_bytes'](SID, page) is None
+                assert http.get(f'/api/nli_image/99{page}').status_code == 404
+                http.get('/api/proxy_image', params={
+                    'url': f'https://iiif.nli.org.il/IIIFv21/FL99{page}/full/400,/0/default.jpg'})
+        assert breaker._state_snapshot()['consecutive_failures'] == 0

@@ -12,7 +12,7 @@ from web.export_service import get_export_service, encode_filename_for_header
 import requests
 import requests.adapters
 
-from shared.nli_fetch import RedirectNotAllowed, nli_image_get
+from shared.nli_fetch import RedirectNotAllowed, nli_image_get, nli_refused
 from shared.puzzle_image_service import RedirectNotFollowed
 import re
 import os
@@ -974,7 +974,8 @@ def init_api_routes(app_override=None):
             elif resp.status_code == 429:
                 _nli_record_failure(failure_type='429', path='nli_image')
             elif 500 <= resp.status_code < 600:
-                _nli_record_failure(failure_type='5xx', path='nli_image')
+                if not nli_refused(resp):
+                    _nli_record_failure(failure_type='5xx', path='nli_image')
             else:
                 # Audit #36: previously fell through silently. Low-noise debug
                 # log of the unexpected status (404 + any 3xx/other 4xx) so
@@ -1021,7 +1022,8 @@ def init_api_routes(app_override=None):
             elif resp.status_code == 429:
                 _nli_record_failure(failure_type='429', path='nli_image')
             elif 500 <= resp.status_code < 600:
-                _nli_record_failure(failure_type='5xx', path='nli_image')
+                if not nli_refused(resp):
+                    _nli_record_failure(failure_type='5xx', path='nli_image')
             else:
                 # Audit #36: previously fell through silently to the final 404.
                 logger.debug(
@@ -1141,7 +1143,7 @@ def init_api_routes(app_override=None):
                     return (resp.content, ct or 'image/jpeg', 'iiif')
                 elif resp.status_code == 429:
                     _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes')
-                elif 500 <= resp.status_code < 600:
+                elif 500 <= resp.status_code < 600 and not nli_refused(resp):
                     _nli_record_failure(failure_type='5xx', path='_fetch_nli_image_bytes')
             # Codex P2 (2026-09-02): record the IIIF failure and FALL THROUGH to
             # Rosetta. Returning here meant an unreachable or TLS-failing IIIF host
@@ -1210,7 +1212,7 @@ def init_api_routes(app_override=None):
                 # instead of opening the breaker. 404 does NOT trip it (D-07).
                 elif r2.status_code == 429:
                     _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes_rosetta_thumb')
-                elif 500 <= r2.status_code < 600:
+                elif 500 <= r2.status_code < 600 and not nli_refused(r2):
                     _nli_record_failure(failure_type='5xx', path='_fetch_nli_image_bytes_rosetta_thumb')
             except RedirectNotAllowed:
                 pass  # a redirect off the library image hosts; not an NLI outage
@@ -1263,7 +1265,8 @@ def init_api_routes(app_override=None):
 
     @target_app.get('/api/nli_image_by_sysid/{sys_id}')
     @_image_cache_headers
-    def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000, suffix: int = 1):
+    def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000, suffix: int = 1,
+                           middle: bool = False):
         """
         Fetch NLI image by System ID. Dynamically gets FL IDs from NLI IIIF manifest.
 
@@ -1271,16 +1274,25 @@ def init_api_routes(app_override=None):
             suffix: IIIF manifest suffix (1=primary IE, 2=second IE, etc.).
                     For multi-IE manuscripts, each IE has its own manifest with
                     different images. Default 1 for single-IE manuscripts.
+            middle: the manuscript's middle image instead of ``page`` (a microfilm's, past its
+                    START frame and catalogue card: ``middle_image``), worked out here from the
+                    image list this route reads anyway, so a page need not read it for a tile.
 
         Phase 85 D-14: synthetic sys_ids return 204 No Content. Image endpoint;
         <img> consumers handle 204 as "image not available" without breaking.
         """
         if is_synthetic_sys_id(sys_id):
             return Response(content="", status_code=204)
+        whole = True
+        if middle:
+            from shared.shelfmark_tree_details import middle_image
+            page = middle_image(len(fetch_fl_ids_from_nli(sys_id, suffix=suffix) or []))
+            whole = _fl_ids_complete(sys_id, suffix)
         got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=suffix, with_kept=True)
         if got is None:
             return Response(content="Image not found", status_code=404)
         content, content_type, _fl_id, kept = got
+        kept = kept and whole         # the middle of a list that is not the whole one: not kept
         # A stand-in (Rosetta, or another page's image) is not kept: a week in the
         # browser and at Cloudflare outlived the NLI hiccup that made it.
         return Response(
@@ -2464,7 +2476,7 @@ def init_api_routes(app_override=None):
                 if is_nli_host:
                     if resp.status_code == 429:
                         _nli_record_failure(failure_type='429', path='proxy_image')
-                    elif 500 <= resp.status_code < 600:
+                    elif 500 <= resp.status_code < 600 and not nli_refused(resp):
                         _nli_record_failure(failure_type='5xx', path='proxy_image')
                 return Response(status_code=resp.status_code)
         except requests.Timeout:

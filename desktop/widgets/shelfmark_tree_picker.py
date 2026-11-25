@@ -44,6 +44,7 @@ import copy
 import html
 from collections import OrderedDict
 import logging
+import time
 import unicodedata
 from typing import Callable, Optional
 
@@ -65,7 +66,8 @@ from genizah_core import tr
 from shared.shelfmark_tree_columns import (NODE_ROWS, WIDE_COLUMNS, leaf_in_view, leaf_tooltip, load_view,
                                            passed_through, settle)
 from shared.shelfmark_tree_details import (
-    add_joins, field_lines, image_index, item_details, page_image_urls, sized_image_url, thumbnail_url,
+    LOOK_MIN, add_joins, field_lines, image_index, image_key, is_microfilm, item_details, look_sharp_width,
+    look_width, opening_image, page_image_urls, sized_image_url, thumbnail_url,
 )
 from shared.shelfmark_tree_rows import (
     COLUMNS, DETAILS_KEY, HEADER_TIPS, SIZE_LABELS, SIZES, STORAGE_KEY, choice_value, details_shown, folds_columns, normal_size, normal_view,
@@ -153,6 +155,10 @@ TABLE_MARKS = {'pgp': ('PGP', '#27ae60'), 'printed': (None, '#dc2626'), 'edition
                'domain': (None, '#8e44ad')}
 #: Thumbnails fetched at once (each may ask NLI for the manuscript's image ids, then its image).
 THUMBS_AT_ONCE = 3
+#: A picture that did not come (NLI down or busy for now: not "none") is asked for again after this long
+#: (past NLI's circuit breaker's window), this many times at most in a picker.
+THUMB_RETRY_S = 65
+THUMB_TRIES = 3
 #: How long the gallery waits for the scrolling to pause before it asks for the tiles in sight (ms).
 THUMBS_DELAY_MS = 120
 #: How the table's columns first take their widths: the title and the snippet share what is left, the
@@ -744,6 +750,16 @@ class _ThumbPool(QObject):
 
 # -- the lists --------------------------------------------------------------------------------
 
+def key_tip(text: str, key: str) -> str:
+    """A button's tooltip with its key (owner, 2026-11-25): "Zoom in (+)"."""
+    return f"{tr(text)} ({key})"
+
+
+def arrow_keys(rtl: bool) -> tuple:
+    """The arrows' names (back, forward) as the keys go: mirrored in Hebrew."""
+    return ('\u2192', '\u2190') if rtl else ('\u2190', '\u2192')
+
+
 class _ZoomImage(QScrollArea):
     """The pane's picture, zoomable: fitted at first; + / - (``zoom_by``), the mouse wheel over it (at
     the pointer) and a drag to move it once zoomed; a double click fits it again. ``zoomed(factor)``
@@ -754,9 +770,13 @@ class _ZoomImage(QScrollArea):
     MAX_ZOOM = 8.0
     STEP = 1.25
 
-    def __init__(self, width: int, height: int, parent=None):
+    def __init__(self, width: Optional[int], height: Optional[int], parent=None):
         super().__init__(parent)
-        self.setFixedSize(width, height)
+        if width and height:
+            self.setFixedSize(width, height)
+        else:                                      # the quick look's: as large as its place, drawn again on a resize
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            self.setMinimumSize(120, 120)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -779,7 +799,9 @@ class _ZoomImage(QScrollArea):
         self.viewport().unsetCursor()
 
     def setText(self, text: str) -> None:          # noqa: N802 -- QLabel's name
+        rotation = self.rotation                   # a page without its picture keeps the turn
         self.clear()
+        self.rotation = rotation
         self._label.setText(text)
 
     def pixmap(self) -> QPixmap:
@@ -869,6 +891,14 @@ class _ZoomImage(QScrollArea):
             self._draw()
             self.zoomed.emit(self.zoom)
 
+    def resizeEvent(self, event):                  # noqa: N802 -- Qt's name
+        super().resizeEvent(event)
+        if self._source is not None and not self._source.isNull():
+            place = self._place() if self.zoom > 1.0 else None
+            self._draw()
+            if place is not None:
+                self._go(*place)
+
     # -- the mouse
     def wheelEvent(self, event):                   # noqa: N802 -- Qt's name
         if self._source is None:
@@ -925,6 +955,8 @@ class _PickerLayoutKeys(QObject):
             return False
         if QApplication.activePopupWidget() is not None or obj.window() is not self.dialog:
             return False
+        if self.dialog.look.isVisible():
+            return False                           # the quick look's own keys (it covers the lists)
         return self.dialog._layout_shortcut(event)
 
 
@@ -2021,8 +2053,8 @@ class _LeafPanel(QWidget):
 
     def _put_picture(self, item, sid: str) -> None:
         known, image = self.dialog.known_thumb(sid)
-        if not known:
-            item.setData(_THUMB_ROLE, None)
+        if not known:                              # on its way; one that did not come: the dash, till it does
+            item.setData(_THUMB_ROLE, False if sid in self.dialog._thumb_tries else None)
             return
         if image is None:
             item.setData(_THUMB_ROLE, False)
@@ -2164,42 +2196,89 @@ def _box_off(item: QTableWidgetItem, off: bool, tip: str, limit_tip: str) -> Non
     item.setToolTip(limit_tip if off else tip)
 
 
-def _thumbnail_image(sys_id: str, meta_mgr, width: int = THUMB_WIDTH) -> Optional[QImage]:
-    """The manuscript's first image, ``width`` pixels wide, as a QImage (made on the worker: never a
-    QPixmap there), or None. Asks NLI's image server through its circuit breaker, as the Join
-    Workbench's thumbnails do (``desktop/join_workbench.py``)."""
-    return _image_at(thumbnail_url(sys_id, meta_mgr, width=width))
+#: The answer of a picture's fetch that failed for now: asked for again later, never kept as "none".
+NOT_COME = object()
+
+
+def _thumbnail_image(sys_id: str, meta_mgr, width: int = THUMB_WIDTH):
+    """The manuscript's picture (``_tile_url``), ``width`` pixels wide, as a QImage (made on the worker:
+    never a QPixmap there); None: it has none; ``NOT_COME``: it did not come this time (NLI down or busy,
+    its address not found). Asks NLI's image server through its circuit breaker, as the Join Workbench's
+    thumbnails do (``desktop/join_workbench.py``)."""
+    image, settled = _load_image(_tile_url(sys_id, meta_mgr, width))
+    return image if settled else NOT_COME
+
+
+def _library_of(sys_id: str) -> str:
+    """The manuscript's own library code (``library_code_of``), '' when not known."""
+    code_of = library_code_of
+    try:
+        return (code_of(sys_id) if code_of is not None else '') or ''
+    except Exception:  # noqa: BLE001 -- not known
+        return ''
+
+
+def _tile_url(sys_id: str, meta_mgr, width: int = THUMB_WIDTH) -> str:
+    """The address of a manuscript's tile: its catalogue thumbnail; a microfilm's middle image (the one its
+    details and quick look open on), by its image list. '' when neither is found. BLOCKING: off the UI
+    thread."""
+    if is_microfilm(_library_of(sys_id)):
+        pages = page_image_urls(sys_id, meta_mgr, width=width)
+        if pages:
+            return pages[_opening_of(sys_id, len(pages))]
+    return thumbnail_url(sys_id, meta_mgr, width=width)
+
+
+def _opening_of(sys_id: str, total: int) -> int:
+    """The image a manuscript's details and quick look open on (``opening_image``: a microfilm's middle one),
+    by its own library code (none: its first)."""
+    return opening_image(_library_of(sys_id), total)
+
+
+def _image_list(sys_id: str, meta) -> tuple:
+    """A manuscript's images (NLI's, in order), its tile's address and the one it opens on. BLOCKING
+    (the manifest): off the UI thread."""
+    pages = page_image_urls(sys_id, meta)
+    return pages, _tile_url(sys_id, meta), _opening_of(sys_id, len(pages))
 
 
 def _image_at(url: str) -> Optional[QImage]:
     """An image by its address as a QImage (on the worker), or None; NLI's through its circuit breaker."""
+    return _load_image(url)[0]
+
+
+def _load_image(url: str) -> tuple:
+    """``(QImage or None, settled)``: not settled when the answer is for now only (no address found, NLI down
+    or busy, the network), so the image may come another time. One not there or refused (4xx,
+    ``nli_refused``: NLI's server is up and will not give it) is a settled None."""
     if not url:
-        return None
+        return None, False
     from shared.nli_circuit_breaker import (
         NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT, is_open, record_failure, record_success,
     )
-    from shared.nli_fetch import is_nli_host, nli_image_get
+    from shared.nli_fetch import is_nli_host, nli_image_get, nli_refused
     nli = is_nli_host(url)
     if nli and is_open():                          # NLI down: no network call
-        return None
+        return None, False
     try:
         resp = nli_image_get(url, headers=genizah_core.Config.HTTP_HEADERS,
                              timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT))
     except Exception:  # noqa: BLE001 -- no image, never a crash
         if nli:
             record_failure(failure_type='connection_error', path='shelf_picker_thumb')
-        return None
+        return None, False
     if resp.status_code != 200:
-        if nli and (resp.status_code == 429 or 500 <= resp.status_code < 600):
+        busy = (resp.status_code == 429 or 500 <= resp.status_code < 600) and not (nli and nli_refused(resp))
+        if nli and busy:
             record_failure(failure_type='429' if resp.status_code == 429 else '5xx', path='shelf_picker_thumb')
-        return None
+        return None, not busy
     image = QImage()
     image.loadFromData(resp.content)
     if image.isNull():                             # a 200 that is no image (an error page): no success
-        return None
+        return None, True
     if nli:
         record_success(path='shelf_picker_thumb')
-    return image
+    return image, True
 
 
 def _community_facts(sys_id: str, client) -> tuple:
@@ -2332,7 +2411,7 @@ class _DetailsPane(QFrame):
             button.setText(text)
             button.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
             button.setAutoRaise(True)
-            button.setToolTip(tr(tip))
+            button.setToolTip(key_tip(tip, 'Shift+R' if degrees < 0 else 'R'))
             button.setAccessibleName(tr(tip))
             button.setObjectName(name)
             button.clicked.connect(lambda _c=False, d=degrees: self.image.rotate_by(d))
@@ -2342,17 +2421,26 @@ class _DetailsPane(QFrame):
                                                 (self.zoom_in, '+', _ZoomImage.STEP, 'Zoom in', 'shelfZoomIn')):
             button.setText(text)
             button.setAutoRaise(True)
-            button.setToolTip(tr(tip))
+            button.setToolTip(key_tip(tip, '+' if factor > 1 else '-'))
             button.setAccessibleName(tr(tip))
             button.setObjectName(name)
             button.clicked.connect(lambda _c=False, f=factor: self.image.zoom_by(f))
         bar.addStretch(1)
         bar.addWidget(self.page_nav)
+        # the quick look: this shelfmark filling the picker, at this page and turn (Q from a list)
+        self.look_button = QToolButton(self.image_bar)
+        self.look_button.setText('\u26f6')
+        self.look_button.setAutoRaise(True)
+        self.look_button.setToolTip(f"{tr('Quick look')} (Q)")
+        self.look_button.setAccessibleName(tr('Quick look'))
+        self.look_button.setObjectName('shelfQuickLookButton')
+        self.look_button.clicked.connect(lambda _c=False: self.dialog.quick_look(self.leaf, self))
         bar.addStretch(1)
         bar.addWidget(self.rotate_left)
         bar.addWidget(self.rotate_right)
         bar.addWidget(self.zoom_out)
         bar.addWidget(self.zoom_in)
+        bar.addWidget(self.look_button)
         self.image_bar.setVisible(False)
         self.shelfmark = QLabel(body)
         bold = self.shelfmark.font()
@@ -2510,7 +2598,7 @@ class _DetailsPane(QFrame):
         if meta is not None and sid and not self.dialog.known_thumb(sid)[0]:
             self.dialog._thumb_pool.fetch(sid)
         if meta is not None and sid:
-            self._pages_loads.request(gen, lambda: (page_image_urls(sid, meta), thumbnail_url(sid, meta)))
+            self._pages_loads.request(gen, lambda: _image_list(sid, meta))
 
     def _put(self, name: str, pairs: list) -> None:
         label = self.fields[name]
@@ -2710,7 +2798,7 @@ class _DetailsPane(QFrame):
             url = sized_image_url(self.pages[page], self.SHARP_WIDTH)
             fetch = (lambda k=key, u=url: (k, _image_at(u)))
         elif page == self._thumb_page and meta is not None:
-            fetch = (lambda k=key, s=sid, m=meta: (k, _image_at(thumbnail_url(s, m, width=self.SHARP_WIDTH))))
+            fetch = (lambda k=key, s=sid, m=meta: (k, _image_at(_tile_url(s, m, width=self.SHARP_WIDTH))))
         else:
             return
         self._sharp_asked.add(key)
@@ -2745,23 +2833,22 @@ class _DetailsPane(QFrame):
     def _pages_done(self, gen: int, out) -> None:
         """The manuscript's image list: the arrows when it has more than one, the ones beside fetched.
         The thumbnail on show is the catalogue record's first image (MARC 907), which need not be the
-        list's first (the manifest's, in image-id order, as Browse has it): the pane starts at the page
-        it is, so the count and the steps are the list's; one the list does not name gives way to the
-        list's first image, fetched."""
-        if gen != self._gen or not isinstance(out, tuple) or len(out) != 2:
+        list's first (the manifest's, in image-id order, as Browse has it): the pane goes to the list's
+        first image (owner, 2026-11-25: it opened on the second), the thumbnail shown until it comes; the
+        count and the steps are the list's."""
+        if gen != self._gen or not isinstance(out, tuple) or len(out) != 3:
             return
-        pages, thumb = out
+        pages, thumb, start = out
         if not isinstance(pages, list) or len(pages) < 2:
             return
         self.pages = pages
         at = image_index(pages, thumb)
         self._thumb_page = at
-        self.page = at if at is not None else 0
+        self.page = start if 0 <= start < len(pages) else 0     # a microfilm: its middle (opening_image)
         self._draw_nav()
-        if at is None:
-            self._ask_page(0)                      # shown when it comes, in the thumbnail's place
+        if at != self.page:
+            self._ask_page(self.page)              # shown when it comes, in the thumbnail's place
         self._prefetch(self.page + 1)
-        self._prefetch(self.page - 1)
 
     def _draw_nav(self) -> None:
         total = len(self.pages)
@@ -2771,6 +2858,9 @@ class _DetailsPane(QFrame):
         right, left = Qt.ArrowType.RightArrow, Qt.ArrowType.LeftArrow
         self.page_prev.setArrowType(right if rtl else left)
         self.page_next.setArrowType(left if rtl else right)
+        back, forward = arrow_keys(rtl)
+        self.page_prev.setToolTip(key_tip('Previous image', f'Shift+{back}'))
+        self.page_next.setToolTip(key_tip('Next image', f'Shift+{forward}'))
         self.page_prev.setEnabled(self.page > 0)
         self.page_next.setEnabled(self.page < total - 1)
         self.page_label.setText(tr('Image {n} of {total}').format(n=self.page + 1, total=total))
@@ -2851,6 +2941,507 @@ class _DetailsPane(QFrame):
         self._pages_loads.stop(wait_ms=0)
         self._page_loads.stop(wait_ms=0)
         self._sharp_loads.stop(wait_ms=0)
+
+
+# -- the quick look ---------------------------------------------------------------------------
+
+class _QuickLook(QFrame):
+    """One shelfmark's picture filling the picker (owner, 2026-11-25), over the lists, which stay where
+    they are under it. Opened by Q from a list or the pane's button; Esc (or Q, or its close button) goes
+    back to the list, at the shelfmark looked at last.
+
+    The picture shown at once is the one at hand (the tile's, or the pane's page), then the same image
+    sized to the window (``look_width``: about 800-1,600 pixels wide, in steps, never every tile's
+    size), and once zoomed in a sharper copy (``look_sharp_width``). The arrows go to the previous / next
+    shelfmark of the list (mirrored in Hebrew), Ctrl + an arrow to the manuscript's previous / next image;
+    the next image and the next shelfmark's are fetched before they are asked for. + / - / 0 zoom, R /
+    Shift+R turn a quarter, Space chooses (several at once: ticks), Enter opens, as in the list."""
+
+    CACHE = 30                                     # the pictures kept (the newest), by image and width
+
+    def __init__(self, dialog: "ShelfPickerDialog"):
+        super().__init__(dialog)
+        self.dialog = dialog
+        self.setObjectName('shelfQuickLook')
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setAutoFillBackground(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._gen = 0
+        self.leaf = None                           # the shelfmark shown (a ShelfLeaf)
+        self.pages: list = []                      # its images' addresses (as page_image_urls has them)
+        self.page = 0                              # the one shown
+        self._thumb_page: Optional[int] = 0        # which of them the thumbnail is (None: none of them)
+        self.width_asked = LOOK_MIN                # the width the picture shown is asked for at
+        self.fit_width = LOOK_MIN                  # ... the width that fills its place (zoomed in: wider)
+        self._images: "OrderedDict[tuple, QImage]" = OrderedDict()   # (image_key, width) -> picture
+        self._sharp_asked: set = set()
+        self._thumb_urls: dict = {}                # sys_id -> the address of the image it opens on (its first)
+        self._urls_loads = _Loads(self._urls_done, self)      # a shelfmark's image list
+        self._image_loads = _Loads(self._image_done, self)    # the picture wanted now
+        self._ahead_loads = _Loads(self._ahead_done, self)    # the next one, before it is wanted
+        self._width_timer = QTimer(self)
+        self._width_timer.setSingleShot(True)
+        self._width_timer.setInterval(300)
+        self._width_timer.timeout.connect(self._grown)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 6, 8, 8)
+        outer.setSpacing(4)
+        bar = QHBoxLayout()
+        bar.setSpacing(4)
+
+        def tool(name: str, tip: str, on_click, text: str = '') -> QToolButton:
+            button = QToolButton(self)
+            if text:
+                button.setText(text)
+            button.setAutoRaise(True)
+            button.setToolTip(tip)
+            button.setAccessibleName(tip)
+            button.setObjectName(name)
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)    # the keyboard stays with the quick look
+            button.clicked.connect(lambda _c=False: on_click())
+            return button
+
+        # the shelfmark and where it is in the list, between its arrows; then the manuscript's images
+        self.leaf_prev = tool('shelfLookPrev', tr('Previous shelfmark'), lambda: self.step_leaf(-1))
+        self.leaf_next = tool('shelfLookNext', tr('Next shelfmark'), lambda: self.step_leaf(1))
+        self._step_loads = _Loads(self._step_done, self)     # past the list's ends: the shelf's order
+        self.title = QLabel(self)
+        bold = self.title.font()
+        bold.setBold(True)
+        bold.setPointSizeF(bold.pointSizeF() * 1.15)
+        self.title.setFont(bold)
+        self.where = QLabel(self)
+        self.page_prev = tool('shelfLookPagePrev', tr('Previous image'), lambda: self.step_page(-1))
+        self.page_next = tool('shelfLookPageNext', tr('Next image'), lambda: self.step_page(1))
+        self.page_label = QLabel(self)
+        for button in (self.leaf_prev, self.leaf_next, self.page_prev, self.page_next):
+            # the style's own arrows on left-to-right buttons, as the pane's (_DetailsPane._draw_nav)
+            button.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        self.image = _ZoomImage(None, None, self)
+        self.image.zoomed.connect(self._zoomed)
+        self.rotate_left = tool('shelfLookRotateLeft', key_tip('Rotate left', 'Shift+R'), lambda: self.image.rotate_by(-90), '\u27f2')
+        self.rotate_right = tool('shelfLookRotateRight', key_tip('Rotate right', 'R'), lambda: self.image.rotate_by(90), '\u27f3')
+        self.zoom_out = tool('shelfLookZoomOut', key_tip('Zoom out', '-'), lambda: self.image.zoom_by(1 / _ZoomImage.STEP), '\u2212')
+        self.zoom_in = tool('shelfLookZoomIn', key_tip('Zoom in', '+'), lambda: self.image.zoom_by(_ZoomImage.STEP), '+')
+        for button in (self.rotate_left, self.rotate_right):
+            button.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        # several at once: the shelfmark's box; one: the picker's own button (Open, Add, ...)
+        self.tick = QCheckBox(tr('Chosen'), self)
+        self.tick.setObjectName('shelfLookTick')
+        self.tick.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tick.clicked.connect(lambda _c=False: self.choose())
+        self.act = QPushButton(self)
+        self.act.setObjectName('shelfLookAct')
+        self.act.setAutoDefault(False)
+        self.act.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.act.clicked.connect(lambda _c=False: self.open_it())
+        self.close_button = tool('shelfLookClose', key_tip('Back to the list', 'Esc'), self.close_look, '\u2715')
+        bar.addWidget(self.leaf_prev)
+        bar.addWidget(self.title)
+        bar.addWidget(self.where)
+        bar.addWidget(self.leaf_next)
+        bar.addStretch(1)
+        bar.addWidget(self.page_prev)
+        bar.addWidget(self.page_label)
+        bar.addWidget(self.page_next)
+        bar.addStretch(1)
+        for widget in (self.rotate_left, self.rotate_right, self.zoom_out, self.zoom_in, self.tick, self.act,
+                       self.close_button):
+            bar.addWidget(widget)
+        outer.addLayout(bar)
+        outer.addWidget(self.image, 1)
+        self.hide()
+
+    # -- opening and closing
+
+    def open_on(self, leaf, pane: Optional["_DetailsPane"] = None) -> None:
+        """Show ``leaf`` filling the picker; from the pane (``pane``, showing that shelfmark) at its page,
+        its turn and its image list."""
+        if leaf is None:
+            return
+        self.setGeometry(self.dialog.rect())
+        self.show()
+        self.raise_()
+        self.layout().activate()                   # its picture's size known now, for the width asked
+        self.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        same = pane is not None and pane.leaf is not None and pane.leaf.id == leaf.id
+        self.show_leaf(leaf, pane if same else None)
+
+    def close_look(self) -> None:
+        if not self.isVisible():
+            return
+        leaf = self.leaf
+        self.hide()
+        self._gen += 1                             # what is still coming is not drawn
+        self.dialog._look_closed(leaf)
+
+    def stop(self) -> None:
+        self._step_loads.stop()                    # the tree: waited for, as the lists' loads are
+        self._urls_loads.stop(wait_ms=0)           # the network, never the tree: not waited for
+        self._image_loads.stop(wait_ms=0)
+        self._ahead_loads.stop(wait_ms=0)
+
+    # -- the shelfmark shown
+
+    def rows(self) -> list:
+        """The shelfmarks of the list under the quick look, in its order (its rows drawn so far)."""
+        leaves = self.dialog.leaf_panel.leaves or {}
+        return [row['leaf'] for row in leaves.get('rows') or () if row.get('leaf') is not None]
+
+    def _at(self) -> int:
+        rows = self.rows()
+        return next((i for i, lf in enumerate(rows) if self.leaf is not None and lf.id == self.leaf.id), -1)
+
+    def show_leaf(self, leaf, pane: Optional["_DetailsPane"] = None) -> None:
+        self._gen += 1
+        gen = self._gen
+        self.leaf = leaf
+        self.pages, self.page, self._thumb_page = [], 0, 0
+        self._sharp_asked = set()
+        self.image.clear()
+        self.title.setText(own_direction(leaf.label or leaf.shelfmark or leaf.sys_id, self.isRightToLeft()))
+        self._draw_where()
+        self._draw_nav()
+        self.sync_choice()
+        start = None
+        if pane is not None and pane.pages:        # the pane's list and page: no new request
+            self.pages, self.page, self._thumb_page = list(pane.pages), pane.page, pane._thumb_page
+            self._draw_nav()
+            source = pane.image._source
+            if source is not None and not source.isNull():
+                start = source
+            if pane.image.rotation:
+                self.image.rotation = pane.image.rotation
+        if start is None:
+            known, image = self.dialog.known_thumb(leaf.sys_id)
+            start = self._kept(self._thumb_urls.get(leaf.sys_id, '')) or (image if known else None)
+        if start is not None:
+            self.image.set_image(start)
+        else:
+            self.image.setText(tr('Loading...'))
+        if self.pages:
+            self._want(self.page, 0)
+            return
+        meta, sid = catalogue, leaf.sys_id
+        if meta is None:
+            if start is None:
+                self.image.setText(tr('No image'))
+            return
+        self._urls_loads.request(gen, lambda: _image_list(sid, meta))
+
+    def _urls_done(self, gen: int, out) -> None:
+        if gen != self._gen or not isinstance(out, tuple) or len(out) != 3:
+            return
+        pages, thumb, start = out
+        pages = pages if isinstance(pages, list) else []
+        start = start if 0 <= start < len(pages) else 0
+        if (pages or thumb) and self.leaf is not None:
+            self._thumb_urls[self.leaf.sys_id] = pages[start] if pages else thumb
+        if pages:
+            # the image the pane opens on (its first; a microfilm's middle): the thumbnail, shown until it
+            # comes, may be another
+            self.pages, self._thumb_page, self.page = pages, image_index(pages, thumb), start
+        elif thumb:
+            self.pages, self.page, self._thumb_page = [thumb], 0, 0
+        else:
+            if self.image.pixmap().isNull():
+                self.image.setText(tr('No image'))
+            return
+        self._draw_nav()
+        self._want(self.page, 0)
+
+    def _draw_where(self) -> None:
+        """Where it is: "12 of 48" in the list; past the list, the name of its group (a volume, a
+        collection). The arrows go on past the list's ends, in the shelf's order."""
+        rows, at = self.rows(), self._at()
+        if at >= 0:
+            self.where.setText(tr('{n} of {total}').format(n=f"{at + 1:,}", total=f"{len(rows):,}"))
+        else:
+            node = self.dialog._service.node(self.leaf.node_id) if self.leaf is not None else None
+            self.where.setText(display_name(node, self.dialog._lang) if node is not None else '')
+        rtl = self.isRightToLeft()
+        right, left = Qt.ArrowType.RightArrow, Qt.ArrowType.LeftArrow
+        self.leaf_prev.setArrowType(right if rtl else left)
+        self.leaf_next.setArrowType(left if rtl else right)
+        back, forward = arrow_keys(rtl)
+        self.leaf_prev.setToolTip(key_tip('Previous shelfmark', back))
+        self.leaf_next.setToolTip(key_tip('Next shelfmark', forward))
+        self.leaf_prev.setEnabled(self.leaf is not None)
+        self.leaf_next.setEnabled(self.leaf is not None)
+
+    def _draw_nav(self) -> None:
+        total = len(self.pages)
+        rtl = self.isRightToLeft()
+        right, left = Qt.ArrowType.RightArrow, Qt.ArrowType.LeftArrow
+        self.page_prev.setArrowType(right if rtl else left)
+        self.page_next.setArrowType(left if rtl else right)
+        back, forward = arrow_keys(rtl)
+        self.page_prev.setToolTip(key_tip('Previous image', f'Shift+{back}'))
+        self.page_next.setToolTip(key_tip('Next image', f'Shift+{forward}'))
+        self.page_prev.setEnabled(self.page > 0)
+        self.page_next.setEnabled(self.page < total - 1)
+        self.page_label.setText(tr('Image {n} of {total}').format(n=self.page + 1, total=total))
+        for widget in (self.page_prev, self.page_label, self.page_next):
+            widget.setVisible(total > 1)
+
+    def sync_choice(self) -> None:
+        """The box (several at once: ticked as the lists have it) or the picker's own button (one)."""
+        dialog = self.dialog
+        self.tick.setVisible(dialog.multi)
+        act = getattr(dialog, 'act_button', None)
+        self.act.setVisible(not dialog.multi and act is not None)
+        if act is not None:
+            self.act.setText(act.text())
+        if dialog.multi and self.leaf is not None:
+            chosen = frozenset((dialog._paint_state or {}).get('chosen') or ())
+            self.tick.setChecked(self.leaf.sys_id in chosen)
+
+    # -- moving
+
+    def step_leaf(self, step: int) -> None:
+        """The list's previous / next shelfmark; past its ends (or once outside it), the shelf's previous /
+        next manuscript, into the next or previous group (owner, 2026-11-25)."""
+        rows, at = self.rows(), self._at()
+        to = at + step
+        if at >= 0 and 0 <= to < len(rows):
+            self.show_leaf(rows[to])
+            return
+        leaf, service = self.leaf, self.dialog._service
+        if leaf is not None:
+            self._step_loads.request(self._gen, lambda lf=leaf, s=step: (s, service.neighbours(lf.id)))
+
+    def _step_done(self, gen: int, out) -> None:
+        if gen != self._gen or not self.isVisible() or not isinstance(out, tuple) or len(out) != 2:
+            return
+        step, pair = out
+        target = pair[1 if step > 0 else 0] if isinstance(pair, tuple) and len(pair) == 2 else None
+        if target is not None:
+            self.show_leaf(target)
+
+    def go_leaf(self, index: int) -> None:
+        rows = self.rows()
+        if rows:
+            self.show_leaf(rows[max(0, min(len(rows) - 1, index))])
+
+    def step_page(self, step: int) -> None:
+        page = max(0, min(len(self.pages) - 1, self.page + step))
+        if not self.pages or page == self.page:
+            return
+        self.page = page
+        self._draw_nav()
+        self._sharp_asked = set()
+        self.image.zoom = 1.0                      # another page opens fitted (it keeps the turn)
+        self._want(page, step)
+
+    # -- the pictures
+
+    def _box_width(self) -> int:
+        """The width that fills the picture's place (device pixels; a quarter turn swaps its sides)."""
+        ratio = self.devicePixelRatioF() or 1.0
+        w, h = self.image.width() * ratio, self.image.height() * ratio
+        source = self.image._source
+        aspect = source.width() / source.height() if source is not None and not source.isNull() and source.height() else 0.0
+        if self.image.rotation % 180:
+            w, h = h, w
+        return look_width(w, h, aspect)
+
+    def _kept(self, url: str, width: int = 0) -> Optional[QImage]:
+        """A picture of ``url``'s image kept here: at ``width``, or (0) the widest kept."""
+        key = image_key(url)
+        if not key:
+            return None
+        if width:
+            image = self._images.get((key, width))
+            if image is not None:
+                self._images.move_to_end((key, width))
+            return image
+        found = [(w, img) for (k, w), img in self._images.items() if k == key]
+        return max(found, key=lambda pair: pair[0])[1] if found else None
+
+    def _keep(self, url: str, width: int, image: QImage) -> None:
+        key = (image_key(url), width)
+        self._images[key] = image
+        self._images.move_to_end(key)
+        while len(self._images) > self.CACHE:
+            self._images.popitem(last=False)
+
+    def _page_url(self, page: int) -> str:
+        return self.pages[page] if 0 <= page < len(self.pages) else ''
+
+    def _want(self, page: int, step: int = 1) -> None:
+        """The page's picture at the window's width: at once when kept, else asked for (the newest wins);
+        meanwhile any picture of it at hand (a narrower one, the tile's)."""
+        url = self._page_url(page)
+        if not url:
+            return
+        width = self.width_asked = self.fit_width = self._box_width()
+        image = self._kept(url, width)
+        if image is not None:
+            self.image.set_image(image, keep_zoom=self.image.zoom > 1.0)
+            self._ahead(page + (step or 1))
+            return
+        at_hand = self._kept(url)
+        if at_hand is None and page == self._thumb_page and self.leaf is not None:
+            known, thumb = self.dialog.known_thumb(self.leaf.sys_id)
+            at_hand = thumb if known else None
+        if at_hand is not None:
+            self.image.set_image(at_hand, keep_zoom=self.image.zoom > 1.0)
+        elif self.image.pixmap().isNull() or step:
+            self.image.setText(tr('Loading...'))
+        sized = sized_image_url(url, width)
+        self._image_loads.request(self._gen, lambda p=page, u=url, w=width, s=sized: (p, u, w, _image_at(s)))
+
+    def _image_done(self, gen: int, out) -> None:
+        if not isinstance(out, tuple) or len(out) != 4:
+            return
+        page, url, width, image = out
+        if isinstance(image, QImage) and not image.isNull():
+            self._keep(url, width, image)
+        if gen != self._gen or page != self.page or url != self._page_url(page):
+            return
+        if not isinstance(image, QImage) or image.isNull():
+            if self.image.pixmap().isNull():
+                self.image.setText(tr('No image'))
+            return
+        shown = self.image._source
+        if width < self.width_asked and shown is not None and not shown.isNull() and shown.width() >= image.width():
+            return                                 # a sharper one is on show already (a zoom came first)
+        self.image.set_image(image, keep_zoom=self.image.zoom > 1.0)
+        self._ahead(page + 1)
+
+    def _ahead(self, page: int) -> None:
+        """Fetched before it is asked for: the manuscript's next image, else the next shelfmark's
+        first (the one it opens on), at the width that fills the place."""
+        width = self.fit_width
+        if 0 <= page < len(self.pages) and page != self.page:
+            url = self._page_url(page)
+            if self._kept(url, width) is None:
+                sized = sized_image_url(url, width)
+                self._ahead_loads.request(self._gen, lambda u=url, w=width, s=sized: (u, w, _image_at(s)))
+                return
+        rows, at = self.rows(), self._at()
+        meta = catalogue
+        if meta is None or not 0 <= at < len(rows) - 1:
+            return
+        sid = rows[at + 1].sys_id
+        known = self._thumb_urls.get(sid)
+        if known and self._kept(known, width) is not None:
+            return
+
+        def fetch(s=sid, m=meta, w=width):
+            # the image it opens on (the thumbnail when it has no list)
+            pages = page_image_urls(s, m)
+            url = pages[_opening_of(s, len(pages))] if pages else thumbnail_url(s, m)
+            return (url, w, _image_at(sized_image_url(url, w)) if url else None, s)
+        self._ahead_loads.request(self._gen, fetch)
+
+    def _ahead_done(self, _gen: int, out) -> None:
+        if not isinstance(out, tuple) or len(out) < 3:
+            return
+        url, width, image = out[:3]
+        if len(out) == 4 and url:
+            self._thumb_urls[out[3]] = url
+        if url and isinstance(image, QImage) and not image.isNull():
+            self._keep(url, width, image)
+
+    def _zoomed(self, zoom: float) -> None:
+        """Zoomed in: the picture asked for again sharper, once a page."""
+        url = self._page_url(self.page)
+        if zoom <= 1.0 or not url:
+            return
+        width = look_sharp_width(self.width_asked)
+        if width <= self.width_asked or (url, width) in self._sharp_asked:
+            return
+        self._sharp_asked.add((url, width))
+        self.width_asked = width
+        image = self._kept(url, width)
+        if image is not None:
+            self.image.set_image(image, keep_zoom=True)
+            return
+        sized = sized_image_url(url, width)
+        page = self.page
+        self._image_loads.request(self._gen, lambda p=page, u=url, w=width, s=sized: (p, u, w, _image_at(s)))
+
+    def _grown(self) -> None:
+        """The window grew: the picture asked for again when its place wants a wider one."""
+        if self.isVisible() and self.pages and self.image.zoom <= 1.0 and self._box_width() > self.width_asked:
+            self._want(self.page, 0)
+
+    def resizeEvent(self, event):                  # noqa: N802 -- Qt's name
+        super().resizeEvent(event)
+        if self.isVisible():
+            self._width_timer.start()
+
+    # -- choosing
+
+    def choose(self) -> None:
+        """Space / the box: the single choice chooses it (shown so in the list when it closes); several at
+        once tick it."""
+        if self.leaf is None:
+            return
+        if self.dialog.multi:
+            self.dialog._toggle_leaf(self.leaf)
+            self.sync_choice()
+        else:
+            self.dialog._select(self.leaf)         # chosen as a click chooses it (the pane shows it, under)
+
+    def open_it(self) -> None:
+        """Enter / the button: as Enter in the list (one: the picker's button; several: Open)."""
+        leaf = self.leaf
+        if leaf is None:
+            return
+        if self.dialog.multi:
+            self.dialog._enter_several(leaf)
+        else:
+            self.hide()
+            self.dialog._pick(leaf)
+
+    # -- the keyboard
+
+    #: Windows' virtual keys of Q and R: by the key, whatever letter the layout gives it (Hebrew: ק / ר)
+    _VK_Q, _VK_R = 0x51, 0x52
+
+    def keyPressEvent(self, event):                # noqa: N802 -- Qt's name
+        key, mods, vk = event.key(), event.modifiers(), event.nativeVirtualKey()
+        ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        alt = bool(mods & Qt.KeyboardModifier.AltModifier)
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        rtl = self.isRightToLeft()
+        forward = Qt.Key.Key_Left if rtl else Qt.Key.Key_Right
+        back = Qt.Key.Key_Right if rtl else Qt.Key.Key_Left
+        event.accept()
+        if key == Qt.Key.Key_Escape or (not ctrl and not alt and (key == Qt.Key.Key_Q or vk == self._VK_Q)):
+            self.close_look()
+        elif key in (forward, back) and not alt:
+            step = 1 if key == forward else -1
+            if ctrl or shift:                      # Shift or Ctrl: the manuscript's images
+                self.step_page(step)
+            else:
+                self.step_leaf(step)
+        elif key in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_PageDown, Qt.Key.Key_PageUp) and not ctrl and not alt:
+            self.step_page(1 if key in (Qt.Key.Key_Down, Qt.Key.Key_PageDown) else -1)
+        elif key in (Qt.Key.Key_Home, Qt.Key.Key_End) and not alt:
+            self.go_leaf(0 if key == Qt.Key.Key_Home else len(self.rows()) - 1)
+        elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal) and not alt:
+            self.image.zoom_by(_ZoomImage.STEP)
+        elif key == Qt.Key.Key_Minus and not alt:
+            self.image.zoom_by(1 / _ZoomImage.STEP)
+        elif key == Qt.Key.Key_0 and not alt:
+            self.image.reset_zoom()
+        elif not ctrl and not alt and (key == Qt.Key.Key_R or vk == self._VK_R):
+            self.image.rotate_by(-90 if shift else 90)
+        elif key == Qt.Key.Key_Space and not ctrl and not alt:
+            self.choose()
+        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not alt:
+            self.open_it()
+        elif key == Qt.Key.Key_Tab or key == Qt.Key.Key_Backtab:
+            pass                                   # the keyboard stays here until the quick look closes
+        else:
+            event.ignore()
+            super().keyPressEvent(event)
+
+    def focusNextPrevChild(self, _next: bool) -> bool:      # noqa: N802 -- Qt's name
+        return False                               # Tab never leaves for the lists under it
 
 
 # -- the dialog -------------------------------------------------------------------------------
@@ -2939,6 +3530,10 @@ class ShelfPickerDialog(QDialog):
         self._rows_gen = 0
         self._closing = False
         self._thumbs: dict = {}
+        self._thumb_tries: dict = {}                # sys_id -> (the tries that did not come, the last's time)
+        self._retry_timer = QTimer(self)
+        self._retry_timer.setSingleShot(True)
+        self._retry_timer.timeout.connect(self._retry_thumbs)
         # the gallery's loads skip a picture known already or under way in the details pane (one fetch)
         # every thumbnail load, the gallery's and the pane's: an image known already is not fetched
         self._thumb_pool = _ThumbPool(self._thumb_done, self, skip=self.thumb_sharp,
@@ -3070,6 +3665,9 @@ class ShelfPickerDialog(QDialog):
         foot.addWidget(buttons)
         layout.addLayout(foot)
 
+        # the quick look (owner, 2026-11-25): over everything, hidden until Q or the pane's button
+        self.look = _QuickLook(self)
+
         self._show_mode_parts()
         self._request(first=True)
         self._load_signs()
@@ -3188,6 +3786,9 @@ class ShelfPickerDialog(QDialog):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._show_details_pane()
+        look = getattr(self, 'look', None)
+        if look is not None and look.isVisible():
+            look.setGeometry(self.rect())
 
     def _show_details_pane(self) -> None:
         """The pane where the reader keeps it shown and the dialog is wide enough for it."""
@@ -3210,6 +3811,7 @@ class ShelfPickerDialog(QDialog):
             if not job.wait(STOP_WAIT_MS):
                 job.finished.connect(job.deleteLater)
         self.details.stop()
+        self.look.stop()
         self._loads.stop()
         self._state_loads.stop()
         self._work_loads.stop()
@@ -3307,7 +3909,9 @@ class ShelfPickerDialog(QDialog):
         forward = Qt.Key.Key_Left if rtl else Qt.Key.Key_Right
         back = Qt.Key.Key_Right if rtl else Qt.Key.Key_Left
         ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
-        if ctrl and key in (forward, back):
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        if (ctrl or shift) and not mods & Qt.KeyboardModifier.AltModifier and key in (forward, back):
+            # Shift or Ctrl + an arrow: the pane's previous / next image (owner, 2026-11-25: Shift too)
             if self.details.isVisible() and self.details.pages:
                 self.details.step_page(1 if key == forward else -1)
             return True
@@ -3322,7 +3926,18 @@ class ShelfPickerDialog(QDialog):
             return True
         if plain and self.leaf_panel.isVisibleTo(self) and self._view_key(event):
             return True
-        if plain and (key == Qt.Key.Key_S or event.nativeVirtualKey() == 0x53) and not mods & Qt.KeyboardModifier.ShiftModifier:
+        vk = event.nativeVirtualKey()
+        if plain and (key == Qt.Key.Key_Q or vk == _QuickLook._VK_Q) and not mods & Qt.KeyboardModifier.ShiftModifier:
+            # Q: the quick look, on the shelfmark the keyboard is on (by the key: a Hebrew layout types ק)
+            self.quick_look(self._leaf_in(obj, column), self.details)    # the pane's: at its page and turn
+            return True
+        if plain and (key == Qt.Key.Key_R or vk == _QuickLook._VK_R):
+            # R / Shift+R: the pane's picture turned a quarter, as its buttons (Hebrew: ר)
+            if self.details.isVisible() and self.details.image.isVisible():
+                shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+                self.details.image.rotate_by(-90 if shift else 90)
+            return True
+        if plain and (key == Qt.Key.Key_S or vk == 0x53) and not mods & Qt.KeyboardModifier.ShiftModifier:
             # S: "Open more than one" on or off (by the key too: a Hebrew layout types ד there)
             if self.switch is not None and self.switch.isEnabled():
                 self.switch.toggle()
@@ -3341,6 +3956,48 @@ class ShelfPickerDialog(QDialog):
                 self._focus_before_column(column)
             return True
         return False
+
+    def _leaf_in(self, obj, column: Optional["_NodeColumn"]):
+        """The shelfmark the keyboard is on in a list (a column's shelfmark row too), or None."""
+        if column is not None:
+            row = column.table.currentRow()
+            data = column.rows[row] if 0 <= row < len(column.rows) else {}
+            return data.get('leaf')
+        return self.leaf_panel.current_leaf() if obj is self.leaf_panel.active() else None
+
+    def quick_look(self, leaf, pane: Optional["_DetailsPane"] = None) -> None:
+        """The quick look on ``leaf`` (from the pane: at its page and turn)."""
+        if leaf is not None:
+            self.look.open_on(leaf, pane)
+
+    def _look_closed(self, leaf) -> None:
+        """Back from the quick look: the list at the shelfmark looked at last, chosen as a click chooses
+        it (several at once: shown in the pane, its box as it was), the keyboard in it."""
+        panel = self.leaf_panel
+        in_list = leaf is not None and any(row.get('leaf') is not None and row['leaf'].id == leaf.id
+                                           for row in (panel.leaves or {}).get('rows') or ())
+        if in_list:
+            if self.multi:
+                panel.mark(leaf)
+                if self.details.leaf_id != leaf.id:
+                    self.details.show_leaf(leaf)
+            elif self._chosen_leaf is None or self._chosen_leaf.id != leaf.id:
+                self._select(leaf)
+            else:
+                panel.mark(leaf)
+            item = panel.active().currentItem()
+            if item is not None:
+                panel.active().scrollToItem(item)
+        if leaf is not None and not in_list:
+            self.reveal(leaf.id)                   # past the list: the picker goes to its group, chosen there
+            return
+        if panel.isVisibleTo(self) and in_list:
+            self._focus_list(panel.active())
+        else:
+            lists = self._shown_lists()
+            last = getattr(self, '_last_list', None)
+            if lists:
+                self._focus_list(last if last in lists else lists[-1])
 
     #: Windows' virtual keys of [ and ]: the keys, not the letters a layout gives them (a Hebrew
     #: keyboard types them the other way round)
@@ -3391,7 +4048,7 @@ class ShelfPickerDialog(QDialog):
         takes the keyboard (the buttons, the pane; the switch, the breadcrumb), the filters passed by. Out
         of the lists: back into the list last in use."""
         lists = self._shown_lists()
-        if not lists:
+        if not lists or self.look.isVisible():
             return
         focus = QApplication.focusWidget()
         if focus not in lists:
@@ -3451,6 +4108,8 @@ class ShelfPickerDialog(QDialog):
 
     def _focus_filter(self) -> None:
         """Ctrl+F: the filter of the list the keyboard is in (or its filter), else of the last list."""
+        if self.look.isVisible():
+            return                                 # under the quick look
         focus = QApplication.focusWidget()
         box = next((c.filter for c in self.node_columns
                     if c.isVisibleTo(self) and focus in (c.table, c.filter)), None)
@@ -3959,6 +4618,8 @@ class ShelfPickerDialog(QDialog):
                 column.paint(out)
         self.leaf_panel.paint(out)
         self.details.paint(out)
+        if self.look.isVisible():
+            self.look.sync_choice()
         self.chips_bar.set_chips(out['chips'])
         if self._all_chips is not None:
             self._all_chips.fill(out)
@@ -4019,6 +4680,9 @@ class ShelfPickerDialog(QDialog):
         """A tile's picture (or none), on the UI thread: kept, and drawn on its tiles."""
         if self._closing:
             return
+        if image is NOT_COME:
+            self._thumb_not_come(sys_id)
+            return
         self.thumb_known(sys_id, image, width)
         if image is not None and width < self.leaf_panel.fetch_width():
             # asked before the tiles grew (it was under way, so the larger size's queue left it out):
@@ -4026,6 +4690,32 @@ class ShelfPickerDialog(QDialog):
             self.leaf_panel._thumb_timer.start()
         if self.details.leaf is not None and self.details.leaf.sys_id == sys_id and image is not None:
             self.details.show_known_image()
+
+    def _thumb_not_come(self, sys_id: str) -> None:
+        """A picture's fetch failed for now: its tile shows none, and it is asked for again in a while
+        (``THUMB_RETRY_S``); after ``THUMB_TRIES`` it counts as none in this picker."""
+        tries = self._thumb_tries.get(sys_id, (0, 0.0))[0] + 1
+        self._thumb_tries[sys_id] = (tries, time.monotonic())
+        if tries >= THUMB_TRIES:
+            self.thumb_known(sys_id, None)
+            return
+        self.leaf_panel.show_picture(sys_id)
+        if not self._retry_timer.isActive():
+            self._retry_timer.start(int(THUMB_RETRY_S * 1000) + 50)
+
+    def _retry_thumbs(self) -> None:
+        """The pictures that did not come, asked for again: the tiles in sight and the details'."""
+        if self._closing:
+            return
+        self.leaf_panel.queue_visible()
+        leaf = self.details.leaf
+        if leaf is not None and catalogue is not None and not self.known_thumb(leaf.sys_id)[0]:
+            self._thumb_pool.fetch(leaf.sys_id)
+        now = time.monotonic()                      # those that failed later than the first: their turn
+        left = [THUMB_RETRY_S - (now - when) for sid, (tries, when) in self._thumb_tries.items()
+                if tries < THUMB_TRIES and now - when < THUMB_RETRY_S]
+        if left:
+            self._retry_timer.start(int(min(left) * 1000) + 50)
 
     def known_thumb(self, sys_id: str) -> tuple:
         """``(known, QImage or None)``: a manuscript's picture as this dialog knows it (None: it has none),
@@ -4047,12 +4737,17 @@ class ShelfPickerDialog(QDialog):
             return                                 # a sharper fetch failed: the picture shown stays
         keep_thumbnail(sys_id, image, width)
         self._thumbs[sys_id] = cached_thumbnail(sys_id) if image is not None else None
+        if image is not None:
+            self._thumb_tries.pop(sys_id, None)
         self.leaf_panel.show_picture(sys_id)
 
     def thumb_sharp(self, sys_id: str) -> bool:
         """The picture of a manuscript is here at the width the tiles want now (or it has none): not
-        asked for again."""
+        asked for again; nor is one that did not come just now, yet."""
         known, image = self.known_thumb(sys_id)
+        tries, when = self._thumb_tries.get(sys_id, (0, 0.0))
+        if tries and time.monotonic() - when < THUMB_RETRY_S:
+            return True
         return known and (image is None or cached_width(sys_id) >= self.leaf_panel.fetch_width())
 
     def _load_signs(self) -> None:

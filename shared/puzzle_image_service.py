@@ -64,6 +64,7 @@ from shared.nli_circuit_breaker import (
     NLI_CONNECT_TIMEOUT,
     NLI_IMAGE_READ_TIMEOUT,
 )
+from shared.nli_fetch import is_nli_host, nli_headers_for, nli_refused
 
 logger = logging.getLogger(__name__)
 
@@ -288,16 +289,19 @@ def get_with_checked_redirects(url: str, *, allowed=None, session=None,
     each request is made with ``allow_redirects=False``. Raises
     ``RedirectNotFollowed`` for a URL that does not pass, or after
     ``max_hops`` redirects. Other keyword arguments go to ``requests.get``
-    (or to ``session.get`` when a ``requests.Session`` is given).
+    (or to ``session.get`` when a ``requests.Session`` is given); NLI's image hosts
+    get NLI's ``Referer``, decided at each hop (``nli_headers_for``).
     """
     allowed = allowed or is_allowed_image_url
     kwargs.pop('allow_redirects', None)
+    headers = kwargs.pop('headers', None)
     current = str(url)
     for _hop in range(max_hops + 1):
         if not allowed(current):
             raise RedirectNotFollowed(f"not an allowed image host: {current[:80]}")
         getter = session.get if session is not None else requests.get
-        resp = getter(current, allow_redirects=False, **kwargs)
+        hop = {'headers': nli_headers_for(current, headers)} if headers is not None or is_nli_host(current) else {}
+        resp = getter(current, allow_redirects=False, **hop, **kwargs)
         location = _redirect_location(resp)
         if location is None:
             return resp
@@ -310,9 +314,12 @@ def get_with_checked_redirects(url: str, *, allowed=None, session=None,
 
 
 def _image_get(url: str, **kwargs):
-    """The HTTP GET of the fetch helpers: checked hops for the web, plain otherwise."""
+    """The HTTP GET of the fetch helpers: checked hops for the web, plain otherwise (NLI's hop by hop
+    too, to any host: its ``Referer`` goes to its own hosts alone)."""
     if _web_rules.get():
         return get_with_checked_redirects(url, **kwargs)
+    if is_nli_host(url):
+        return get_with_checked_redirects(url, allowed=lambda _u: True, **kwargs)
     return requests.get(url, **kwargs)
 
 
@@ -661,7 +668,7 @@ class PuzzleImageService:
                 if is_nli_host:
                     if resp.status_code == 429:
                         _nli_record_failure(failure_type='429', path='puzzle_fetch_direct_url')
-                    elif 500 <= resp.status_code < 600:
+                    elif 500 <= resp.status_code < 600 and not nli_refused(resp):
                         _nli_record_failure(failure_type='5xx', path='puzzle_fetch_direct_url')
         except requests.exceptions.Timeout as e:
             logger.warning(f"Direct IIIF timeout for {image_url[:80]}: {e}")
@@ -769,7 +776,8 @@ class PuzzleImageService:
                 _nli_record_failure(failure_type='429', path='puzzle_fetch_iiif_image')
                 logger.warning(f"IIIF 429 for {fl_id}")
             elif 500 <= resp.status_code < 600:
-                _nli_record_failure(failure_type='5xx', path='puzzle_fetch_iiif_image')
+                if not nli_refused(resp):
+                    _nli_record_failure(failure_type='5xx', path='puzzle_fetch_iiif_image')
                 logger.warning(f"IIIF {resp.status_code} for {fl_id}")
             else:
                 logger.warning(

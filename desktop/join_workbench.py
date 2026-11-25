@@ -925,7 +925,7 @@ if _QT_AVAILABLE:
                 record_failure as _nli_record_failure,
                 record_success as _nli_record_success,
             )
-            from shared.nli_fetch import is_nli_host, nli_image_get
+            from shared.nli_fetch import is_nli_host, nli_image_get, nli_refused
 
             for i, sid in enumerate(self.sids):
                 if self._cancel:
@@ -957,7 +957,7 @@ if _QT_AVAILABLE:
                                     qimg = candidate
                             elif nli and resp.status_code == 429:
                                 _nli_record_failure(failure_type='429', path='join_workbench_thumb')
-                            elif nli and 500 <= resp.status_code < 600:
+                            elif nli and 500 <= resp.status_code < 600 and not nli_refused(resp):
                                 _nli_record_failure(failure_type='5xx', path='join_workbench_thumb')
                 except requests.exceptions.Timeout:
                     if nli:

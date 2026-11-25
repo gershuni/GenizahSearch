@@ -345,7 +345,62 @@ def page_image_urls(sys_id: str, meta_mgr: Any, width: int = 400) -> list:
             if isinstance(image, dict) and image.get('url')]
 
 
+#: The quick look's picture: asked for at a width that fills its box, in steps (an address seen again
+#: comes from a cache), never narrower than the tiles' nor wider than this.
+LOOK_STEP = 200
+LOOK_MIN = 400
+LOOK_MAX = 1600
+#: Zoomed in, the quick look's picture is asked for again this many times wider, up to LOOK_SHARP_MAX.
+LOOK_SHARP_FACTOR = 2
+LOOK_SHARP_MAX = 2000
+
+
+def look_width(box_width: float, box_height: float, aspect: float = 0.0) -> int:
+    """The width a picture is asked for to fill a box of ``box_width`` x ``box_height`` device pixels,
+    ``aspect`` its width over its height (a portrait leaf, 3:4, when not known): the fitted width,
+    rounded up to ``LOOK_STEP``, between ``LOOK_MIN`` and ``LOOK_MAX``. Asked by width alone (``w,``),
+    the size every IIIF server answers."""
+    aspect = aspect if aspect and aspect > 0 else 0.75
+    fitted = min(max(0.0, box_width), max(0.0, box_height) * aspect)
+    stepped = -(-int(fitted) // LOOK_STEP) * LOOK_STEP
+    return max(LOOK_MIN, min(LOOK_MAX, stepped))
+
+
+def look_sharp_width(width: int) -> int:
+    """The width of the zoomed picture's sharper copy (``look_width``'s, larger), stepped as it is."""
+    return max(width, min(LOOK_SHARP_MAX, -(-int(width * LOOK_SHARP_FACTOR) // LOOK_STEP) * LOOK_STEP))
+
+
 _FL_ID = re.compile(r'/FL(\d+)(?:/|$)')
+
+
+#: Libraries whose images are microfilm frames: a START target first, then a catalogue card, the leaves
+#: after them (the National Library of Russia's; owner, 2026-11-25).
+MICROFILM_LIBRARIES = frozenset({'RNL'})
+
+
+def middle_image(total: int) -> int:
+    """The middle one of ``total`` images, at least the third; the first when there are fewer than three."""
+    return min(total - 1, max(2, total // 2)) if total >= 3 else 0
+
+
+def is_microfilm(library_code: str) -> bool:
+    """A library whose images are microfilm frames (``MICROFILM_LIBRARIES``)."""
+    return (library_code or '').strip().upper() in MICROFILM_LIBRARIES
+
+
+def opening_image(library_code: str, total: int) -> int:
+    """Which of a manuscript's ``total`` images the details and the quick look open on: its first; a
+    microfilm's (``MICROFILM_LIBRARIES``, three images or more) its middle one, at least its third: past
+    the START target and the catalogue card, among the leaves."""
+    return middle_image(total) if is_microfilm(library_code) else 0
+
+
+def image_key(url: str) -> str:
+    """What names an image whatever address and width ask for it: NLI's image id (``FL...``), else the
+    address itself."""
+    found = _FL_ID.search(url or '')
+    return f"FL{found.group(1)}" if found else (url or '')
 
 
 def image_index(urls: list, url: str) -> Optional[int]:

@@ -37,7 +37,7 @@ from shared.nli_circuit_breaker import (
     record_failure as _nli_record_failure,
     record_success as _nli_record_success,
 )
-from shared.nli_fetch import is_nli_host, nli_image_get
+from shared.nli_fetch import is_nli_host, nli_image_get, nli_refused
 from shared.metadata_manager import ROSETTA_PLACEHOLDER_MAX_BYTES
 
 logger = get_logger(__name__)
@@ -434,7 +434,7 @@ class ImageLoaderThread(QThread):
             if nli:
                 if resp.status_code == 429:
                     _nli_record_failure(failure_type='429', path='desktop_image_loader')
-                elif 500 <= resp.status_code < 600:
+                elif 500 <= resp.status_code < 600 and not nli_refused(resp):
                     _nli_record_failure(failure_type='5xx', path='desktop_image_loader')
             return None
         except requests.exceptions.Timeout as e:

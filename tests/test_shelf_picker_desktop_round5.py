@@ -196,9 +196,10 @@ def test_previous_and_next_walk_the_manuscript_s_images_the_next_fetched_ahead(s
         _close(dialog)
 
 
-def test_the_thumbnail_is_counted_where_it_is_in_the_image_list(svc, monkeypatch):
+def test_the_pane_opens_on_the_list_s_first_image_whatever_the_thumbnail_is(svc, monkeypatch):
     # Seen in the app (T-S C2.13): the thumbnail is the catalogue record's first image, here the list's
-    # second; counted as the first, "next" showed the same picture again
+    # second; counted as the first, "next" showed the same picture again. Then (owner, 2026-11-25) the pane
+    # opened on "Image 2": it goes to the list's first, the thumbnail shown until that comes
     sid, fetched = SYS["as2"][0], []
 
     def image_at(url):
@@ -212,15 +213,12 @@ def test_the_thumbnail_is_counted_where_it_is_in_the_image_list(svc, monkeypatch
         pane = dialog.details
         _click_item(dialog, sid)
         assert _wait(lambda: pane.page_nav.isVisible())
-        assert pane.page == 1 and pane.page_label.text() == "Image 2 of 3"
-        assert pane.page_prev.isEnabled() and pane.page_next.isEnabled()
-        assert _wait(lambda: any(f"FL{sid}1/" in u for u in fetched) and any(f"FL{sid}3/" in u for u in fetched))
-        assert not any(f"FL{sid}2/" in u for u in fetched)      # the one on show is not fetched again
-        pane.page_prev.click()
-        assert pane.page_label.text() == "Image 1 of 3"
+        assert pane.page == 0 and pane.page_label.text() == "Image 1 of 3"
+        assert not pane.page_prev.isEnabled() and pane.page_next.isEnabled()
         assert _wait(lambda: pane.image._source is not None and pane.image._source.width() == 401)
-        pane.page_next.click()                                 # back to the thumbnail, at once
-        assert pane.image._source.width() == 402
+        assert not any(f"FL{sid}2/" in u for u in fetched)      # the thumbnail is image 2: not fetched again
+        pane.page_next.click()                                 # the thumbnail, at once
+        assert pane.page_label.text() == "Image 2 of 3" and pane.image._source.width() == 402
         pane.page_next.click()
         assert _wait(lambda: pane.image._source.width() == 403)
     finally:

@@ -17,7 +17,10 @@ NLI fetch sites:
   ``verify=True`` everywhere else.
 - :func:`nli_image_get` — a thin ``requests.get`` wrapper that applies the
   verify policy and suppresses the ``InsecureRequestWarning`` *host-scoped*
-  (only around the actual NLI call, never installed as a global filter).
+  (only around the actual NLI call, never installed as a global filter). It
+  also sends NLI's own ``Referer`` to those hosts (below).
+- :func:`nli_refused` — NLI's image server answered, and will not give this
+  image: the host is up, so the answer is not a circuit-breaker failure.
 
 Deliberately tiny and dependency-free (only ``requests`` / ``urllib`` /
 ``warnings``) so both ``web/`` and ``desktop/`` can import it without a cycle.
@@ -52,6 +55,11 @@ NLI_IMAGE_HOSTS = frozenset({
     'rosetta.nli.org.il',
 })
 
+# NLI's IIIF server gives some collections' images (the National Library of
+# Russia's, 2026-11-25) only to a request that comes from NLI's own site; without
+# this it answers HTTP 500, "unauthorized ... no permissions".
+NLI_REFERER = 'https://www.nli.org.il/'
+
 
 def host_of(url: str) -> str:
     """Return the lowercased hostname of ``url`` ('' if unparseable)."""
@@ -77,6 +85,31 @@ def nli_verify_for(url: str) -> bool:
     ``True`` for every other host.
     """
     return not is_nli_host(url)
+
+
+def nli_headers_for(url: str, headers=None) -> dict:
+    """``headers`` as ``url``'s host needs them: an NLI image host gets NLI's
+    ``Referer`` unless the caller set one; every other host gets them as they are.
+    """
+    out = dict(headers or {})
+    if is_nli_host(url) and not any(str(k).lower() == 'referer' for k in out):
+        out['Referer'] = NLI_REFERER
+    return out
+
+
+def nli_refused(resp) -> bool:
+    """NLI's image server answered a 5xx that is a refusal of this image, not an
+    outage: an XML error naming the parameter ``unauthorized`` (no permission, or
+    a size it does not allow). Such an answer says the host is up, so callers do
+    not count it toward the circuit breaker.
+    """
+    try:
+        if not 500 <= int(resp.status_code) < 600:
+            return False
+        body = resp.content
+    except Exception:
+        return False
+    return isinstance(body, bytes) and b'<parameter>unauthorized</parameter>' in body[:1000]
 
 
 # Cap manual redirect following at the same default `requests` uses.
@@ -150,7 +183,7 @@ def nli_image_get(url, *, headers=None, timeout=None, stream=False,
     while True:
         verify = nli_verify_for(current_url)
         resp = _get_once(
-            current_url, verify=verify, headers=headers, timeout=timeout,
+            current_url, verify=verify, headers=nli_headers_for(current_url, headers), timeout=timeout,
             stream=stream, session=session, **kwargs,
         )
         if not allow_redirects:
@@ -179,9 +212,12 @@ def nli_image_get(url, *, headers=None, timeout=None, stream=False,
 
 __all__ = [
     'NLI_IMAGE_HOSTS',
+    'NLI_REFERER',
     'RedirectNotAllowed',
     'host_of',
     'is_nli_host',
+    'nli_headers_for',
+    'nli_refused',
     'nli_verify_for',
     'nli_image_get',
 ]

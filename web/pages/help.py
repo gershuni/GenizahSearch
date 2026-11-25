@@ -924,12 +924,24 @@ you tick is kept until you use it or clear it, and can be saved as a list.
 opens the row and goes into its list, the arrow back goes to the list before (in Hebrew the arrows are
 mirrored). **Space** chooses a shelfmark (with several at once: ticks it), **Enter** opens it; moving onto a
 shelfmark with the arrows chooses it too. From a
-list: **Ctrl** with an arrow is the previous or next image in the details, **+** / **-** / **0** zoom
+list: **Shift** or **Ctrl** with an arrow is the previous or next image in the details, **+** / **-** / **0** zoom
 it, **1** / **2** / **3** show the shelfmarks as a list, a table or thumbnails and **[** / **]** make the
 thumbnails smaller or larger, **S** turns **Open more than one** on or off. With several at once,
 **Space** ticks and **Enter** opens what is ticked. **Ctrl+F** goes to the list's filter and **Esc**
 back to the list; **Alt+D** hides or shows the details. **W**, on any page (outside a box you type in),
-opens Pick from the shelf. Under the image, the arrows beside the zoom turn it a quarter.
+opens Pick from the shelf. Under the image, the arrows beside the zoom turn it a quarter (**R** /
+**Shift+R** from a list).
+
+**Quick look:** **Q** on a shelfmark, or the full-screen button under the image in the details, shows its
+image filling the window, sharp enough to read, from its first image (on the shelfmark the details show,
+from the details' image; a National Library of Russia microfilm from its middle image, past the START
+frame and the catalogue card). The arrows go to the previous or
+next shelfmark of the list, and past its ends on along the shelf into the next or previous volume or
+collection; **Shift** or **Ctrl** with an arrow (or **Up** / **Down**) go to the manuscript's previous or
+next image. The buttons' tooltips name their keys. The mouse
+wheel, **+** / **-** / **0** zoom, **R** / **Shift+R** turn it, **Space** chooses it (with several at
+once: ticks it) and **Enter** opens it. **Esc** or **Q** goes back to the list, at the shelfmark you
+looked at last.
 
 **Exclude from the shelf:** in Search, **Exclude known manuscripts** > **Pick from the shelf** ticks
 whole volumes, collections or single shelfmarks, with no limit, and excludes them all.
@@ -981,12 +993,21 @@ manuscript** follow the shelf, across volumes and collections.
 יוצא מהרשימות אל הכפתורים והפרטים, וחוזר); ברשימה זזים בחצים,
 ב-**Home** / **End** וב-**Page Up** / **Page Down**. בעמודה, החץ קדימה פותח את השורה ועובר לרשימה שלה,
 והחץ אחורה חוזר לרשימה הקודמת (בעברית החצים הפוכים). **רווח** בוחר מספר מדף (בבחירת כמה: מסמן אותו),
-ו-**Enter** פותח אותו; גם מעבר בחצים אל מספר מדף בוחר בו. מתוך רשימה: **Ctrl** עם חץ עובר לתמונה הקודמת או הבאה בפרטים, **+** / **-** / **0**
+ו-**Enter** פותח אותו; גם מעבר בחצים אל מספר מדף בוחר בו. מתוך רשימה: **Shift** או **Ctrl** עם חץ עוברים לתמונה הקודמת או הבאה בפרטים, **+** / **-** / **0**
 מגדילים, מקטינים ומחזירים אותה לגודלה, **1** / **2** / **3** מציגים את מספרי המדף כרשימה, כטבלה או
 כתמונות ממוזערות, ו-**[** / **]** מקטינים או מגדילים את התמונות הממוזערות. **Ctrl+F** עובר לסינון של
 הרשימה ו-**Esc** חוזר לרשימה; **Alt+D** מסתיר או מציג את הפרטים; **S** מפעיל או מכבה את **פתיחת כמה
 כתבי יד**. בבחירת כמה, **רווח** מסמן ו-**Enter** פותח את המסומנים. **W**, בכל עמוד (מחוץ לתיבת הקלדה),
-פותח את הבחירה מהמדף. מתחת לתמונה, החצים שליד ההגדלה מסובבים אותה ברבע.
+פותח את הבחירה מהמדף. מתחת לתמונה, החצים שליד ההגדלה מסובבים אותה ברבע (**R** / **Shift+R** מתוך
+רשימה).
+
+**מבט מהיר:** **Q** על מספר מדף, או כפתור המסך המלא שמתחת לתמונה בפרטים, מציג את התמונה שלו על כל
+החלון, חדה מספיק לקריאה, מהתמונה הראשונה שלו (על מספר המדף שבפרטים, מהתמונה שבפרטים; מיקרופילם של
+הספרייה הלאומית של רוסיה מהתמונה האמצעית, אחרי שקופית ה-START וכרטיס הקטלוג). החצים עוברים למספר המדף הקודם או הבא ברשימה, ומעבר
+לקצותיה ממשיכים לאורך המדף אל הכרך או האוסף הבא או הקודם; **Shift** או **Ctrl** עם חץ (או **למעלה** /
+**למטה**) עוברים לתמונה הקודמת או הבאה של כתב היד. בחלוניות העזרה של הכפתורים מופיעים המקשים שלהם. גלגלת העכבר ו-**+** / **-** / **0** מגדילים, **R** /
+**Shift+R** מסובבים, **רווח** בוחר בו (בבחירת כמה: מסמן אותו) ו-**Enter** פותח אותו. **Esc** או **Q**
+חוזרים לרשימה, אל מספר המדף שבו הבטתם אחרון.
 
 **החרגה מהמדף:** בחיפוש, **החרג כתבי יד מוכרים** > **בחירה מהמדף** מסמן כרכים, אוספים או מספרי מדף
 בודדים, בלי גבול, ומחריג את כולם.
