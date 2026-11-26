@@ -27,7 +27,7 @@ from web.feature_flags import WEB_PUZZLE_ENABLED, web_fgp_enabled
 from web.components.filter_panel import persist_value
 from web.components.bodleian_links import render_bodleian_links
 from web.components.results_trail import (MAX_ITEMS as TRAIL_MAX_ITEMS, SEARCH_PAGE_JS as TRAIL_SEARCH_PAGE_JS,
-                                         TrailItem, keep_trail, short_text, trail_params)
+                                         TrailItem, keep_trail, short_text, short_title, trail_params)
 from web.pages.browse_state import (page_has_reading_view, normalize_rotation, clamp_rotation,
                                     ROTATION_MIN, ROTATION_MAX)
 from web.pages.search_state import (
@@ -177,8 +177,9 @@ def keep_results_trail(search_state, results) -> None:
         url = result_browse_url(res, state.meta_mgr)
         if not url:
             break  # the list stops at a result Browse cannot open: next / previous never skip one
-        items.append(TrailItem(url=url, shelfmark=(res.get('display') or {}).get('shelfmark', '') or '',
-                               text=short_text(res.get('snippet', ''))))
+        display = res.get('display') or {}
+        items.append(TrailItem(url=url, shelfmark=display.get('shelfmark', '') or '',
+                               text=short_text(res.get('snippet', '')), title=short_title(display.get('title'))))
     token = keep_trail(items, owner=get_persisted_session_uuid(),
                        more=bool(search_state.result_count_capped) or len(items) < len(results))
     if token:

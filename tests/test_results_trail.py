@@ -67,6 +67,26 @@ def test_short_text_drops_the_markers_and_cuts():
     assert len(long) == rt.TEXT_CHARS + 1 and long.endswith('…')
 
 
+def test_short_title_is_the_titles_beginning():
+    assert rt.short_title('  פירוש   לתורה ') == 'פירוש לתורה'
+    assert rt.short_title(None) == ''
+    cut = rt.short_title('ב' * (rt.TITLE_CHARS + 5))
+    assert len(cut) == rt.TITLE_CHARS + 1 and cut.endswith('…')
+
+
+def test_a_row_shows_the_titles_beginning_escaped_and_none_without_one():
+    items = [TrailItem(url='/browse?sys_id=1', shelfmark='T-S 1', text='x', title='<i>Letter</i> to'),
+             TrailItem(url='/browse?sys_id=2', shelfmark='T-S 2', text='z')]
+    first, second = rt.list_html(rt.get_trail(rt.keep_trail(items, owner='o'), owner='o'), 0).split('</a>')[:2]
+    assert 'results-trail-title' in first and '&lt;i&gt;Letter&lt;/i&gt; to' in first and '<i>' not in first
+    assert first.index('results-trail-sm') < first.index('results-trail-title') < first.index('results-trail-text')
+    assert 'results-trail-title' not in second
+
+
+def test_the_current_row_has_a_dark_theme_colour_of_its_own():
+    assert '[data-theme="dark"] .results-trail-item.is-current { background: var(--bg-active); }' in rt._STYLE
+
+
 def test_each_link_carries_the_list_and_its_place():
     token = rt.keep_trail(_items(3), owner='o')
     trail = rt.get_trail(token, owner='o')
@@ -114,8 +134,8 @@ def test_closing_the_bar_drops_its_address_parameters(monkeypatch):
 
 # --- the search page -------------------------------------------------------------------------
 
-def _result(sys_id, shelfmark, snippet='a *b* c'):
-    return {'display': {'id': sys_id, 'shelfmark': shelfmark}, 'snippet': snippet}
+def _result(sys_id, shelfmark, snippet='a *b* c', title=''):
+    return {'display': {'id': sys_id, 'shelfmark': shelfmark, 'title': title}, 'snippet': snippet}
 
 
 def _search_state():
@@ -129,12 +149,13 @@ def test_the_search_keeps_its_list_once_and_a_new_list_anew(monkeypatch):
     monkeypatch.setattr(ss, 'get_persisted_session_uuid', lambda: 'o')
     monkeypatch.setattr(sr, 'state', SimpleNamespace(meta_mgr=None))
     st = _search_state()
-    results = [_result('990001', 'T-S 1'), _result('990002', 'T-S 2')]
+    results = [_result('990001', 'T-S 1', title='מכתב   מפוסטאט'), _result('990002', 'T-S 2')]
     sr.keep_results_trail(st, results)
     token = st.trail_token
     trail = rt.get_trail(token, owner='o')
     assert st.trail_size == 2 and [i.shelfmark for i in trail.items] == ['T-S 1', 'T-S 2']
     assert trail.items[0].url == '/browse?sys_id=990001&highlight=b' and trail.items[0].text == 'a b c'
+    assert trail.items[0].title == 'מכתב מפוסטאט' and trail.items[1].title == ''
     sr.keep_results_trail(st, results)
     assert st.trail_token == token            # the same list: kept once
     sr.keep_results_trail(st, results[:1])

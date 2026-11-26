@@ -43,6 +43,8 @@ MAX_TRAILS = 200
 KEEP_SECONDS = 6 * 60 * 60
 #: Characters of a result's matched words shown in the list.
 TEXT_CHARS = 90
+#: Characters of a result's title shown in the list (its beginning).
+TITLE_CHARS = 40
 
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{8,40}$")
 #: The UI's line-break sentinel in a snippet (SearchEngine.highlight).
@@ -54,6 +56,7 @@ class TrailItem:
     url: str          # the result's Browse address, without this list's parameters
     shelfmark: str
     text: str         # the matched words, short (short_text)
+    title: str = ""   # the beginning of the manuscript's title (short_title)
 
 
 @dataclass
@@ -76,6 +79,15 @@ def short_text(snippet: Optional[str]) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) > TEXT_CHARS:
         text = text[:TEXT_CHARS].rstrip() + "…"
+    return text
+
+
+def short_title(title: Optional[str]) -> str:
+    """The beginning of a result's title, one line: spaces collapsed, cut to TITLE_CHARS with
+    an ellipsis."""
+    text = re.sub(r"\s+", " ", title or "").strip()
+    if len(text) > TITLE_CHARS:
+        text = text[:TITLE_CHARS].rstrip() + "…"
     return text
 
 
@@ -194,18 +206,20 @@ def _back_js(token: str) -> str:
 # --- Browse: the bar ----------------------------------------------------------------------------
 
 def list_html(trail: Trail, index: int) -> str:
-    """The scrolling list: one link a result (its number, shelfmark and matched words), the
-    current one marked; every text escaped. A click replaces the page (the bar's own way), a
-    middle click opens a tab as any link does."""
+    """The scrolling list: one link a result (its number, shelfmark, the beginning of its title
+    and its matched words), the current one marked; every text escaped. A click replaces the
+    page (the bar's own way), a middle click opens a tab as any link does."""
     rows = []
     for i, item in enumerate(trail.items):
         current = i == index
         attrs = ' aria-current="true" data-current="1"' if current else ""
+        title = (f'<span class="results-trail-title" dir="auto">{html.escape(item.title)}</span>'
+                 if item.title else '')
         rows.append(
             f'<a class="results-trail-item{" is-current" if current else ""}"{attrs} '
             f'href="{html.escape(item_url(trail, i), quote=True)}">'
             f'<span class="results-trail-num">{i + 1}</span>'
-            f'<span class="results-trail-sm" dir="auto">{html.escape(item.shelfmark)}</span>'
+            f'<span class="results-trail-sm" dir="auto">{html.escape(item.shelfmark)}</span>{title}'
             f'<span class="results-trail-text" dir="auto">{html.escape(item.text)}</span></a>')
     return "".join(rows)
 
@@ -225,8 +239,10 @@ _LIST_JS = """
       location.replace(a.href);
     });
   }
+  // Only the list scrolls to the current result (scrollIntoView would scroll the menu too, and
+  // take the way back above the list out of view).
   const cur = box.querySelector('[data-current]');
-  if (cur) cur.scrollIntoView({block: 'center'});
+  if (cur) box.scrollTop = Math.max(0, cur.offsetTop - box.offsetTop - (box.clientHeight - cur.offsetHeight) / 2);
 })();
 """
 
@@ -235,14 +251,20 @@ _STYLE = """
 .results-trail { min-height: 34px; padding: 2px 6px; margin-bottom: 8px; border-radius: 8px;
   background: var(--bg-tertiary); border: 1px solid var(--border-light); color: var(--text-secondary); }
 .results-trail .results-trail-count { min-width: 0; }
-.results-trail-list { max-height: 60vh; overflow-y: auto; width: min(34rem, 90vw); }
+.results-trail-list { max-height: 60vh; overflow-y: auto; overflow-x: hidden; width: min(42rem, calc(92vw - 40px)); }
 .results-trail-item { display: flex; min-width: 0; gap: 8px; align-items: baseline; padding: 6px 12px;
   text-decoration: none; color: var(--text-primary); border-bottom: 1px solid var(--border-light); }
 .results-trail-item:hover, .results-trail-item:focus { background: var(--bg-tertiary); }
-.results-trail-item.is-current { background: var(--primary-100); }
+.results-trail-item.is-current { background: var(--primary-100);
+  box-shadow: inset -3px 0 0 var(--border-focus, #10b981); }
+[dir="ltr"] .results-trail-item.is-current { box-shadow: inset 3px 0 0 var(--border-focus, #10b981); }
+/* The dark theme's own selected-row colour: --primary-100 is a light green there too, under light text. */
+[data-theme="dark"] .results-trail-item.is-current { background: var(--bg-active); }
 .results-trail-num { color: var(--text-muted); font-size: 0.75rem; min-width: 2.5em; flex-shrink: 0; }
 .results-trail-sm { font-weight: 600; white-space: nowrap; flex-shrink: 0; }
-.results-trail-text { color: var(--text-secondary); font-size: 0.85rem; min-width: 0;
+.results-trail-title { font-size: 0.85rem; color: var(--text-primary); flex: 0 1 auto; max-width: 15em;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.results-trail-text { color: var(--text-secondary); font-size: 0.85rem; min-width: 0; flex: 1 1 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media print { .results-trail { display: none !important; } }
 </style>
