@@ -3145,6 +3145,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             last_step = search_state.refinement_chain[-1]
             query_input.value = last_step.query
             mode_select.value = 'exact' if last_step.mode == 'literal' else last_step.mode if last_step.mode in ('exact', 'variants', 'variants_extended', 'variants_maximum', 'responsa', 'Regex', 'Title', 'Shelfmark', 'Catalog') else 'exact'
+            on_mode_change()  # a value set in code fires no change event
             # Remove the last step so re-search in refine mode re-adds it
             search_state.refinement_chain = search_state.refinement_chain[:-1]
             if search_state.refinement_chain:
@@ -3498,8 +3499,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Reset all search state, clear results, filters, exclusions, and persistent storage."""
         # Clear query input
         query_input.value = ''
-        # Reset mode to exact
+        # Reset mode to exact; a value set in code fires no change event, so the mode's own
+        # controls (the Title / Catalog switches, Responsa options, ...) follow it by hand.
         mode_select.value = 'exact'
+        on_mode_change()
         # Clear results
         search_state.results = []
         search_state.responsa_warning = None

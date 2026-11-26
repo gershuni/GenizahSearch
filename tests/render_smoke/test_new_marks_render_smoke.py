@@ -127,3 +127,38 @@ def test_the_fuzzy_switch_says_new_in_title_mode_until_worked(monkeypatch, tmp_p
     assert facts['shown']['switch'] == ('New! Fuzzy search', True), facts
     assert facts['spent'] == {TITLE_FUZZY_USED_KEY: True}, facts
     assert facts['worked']['switch'] == PLAIN, facts
+
+
+def _new_search(user):
+    with user._client:
+        button = next(e for e in user._client.elements.values()
+                      if isinstance(e, ui.button) and 'restart_alt' in str(e.props.get('icon')))
+    _reader_sets_click(user, button)
+
+
+def _reader_sets_click(user, element):
+    ran = 0
+    with user._client:
+        for listener in list(element._event_listeners.values()):
+            if listener.type == 'click':
+                events.handle_event(listener.handler, events.ClickEventArguments(
+                    sender=element, client=user._client))
+                ran += 1
+    assert ran, element
+
+
+def test_new_search_hides_the_title_and_catalog_switches(monkeypatch, tmp_path):
+    """New Search puts the mode back to Exact in code, which fires no change event: the
+    Fuzzy search / Automatic translations switches must go with Title or Catalog mode."""
+    for mode in ('Title', 'Catalog'):
+        seen = {}
+        (tmp_path / mode).mkdir()
+
+        def look(user, key):
+            near = _fuzzy_switch(user)
+            seen[key] = (_mode_list(user).value, near.parent_slot.parent.visible)
+
+        _open(monkeypatch, tmp_path / mode, {'search_mode': mode, CATALOG_SEARCH_USED_KEY: True},
+              steps=[('before', lambda u: look(u, 'before')),
+                     ('reset', lambda u: (_new_search(u), look(u, 'after')))])
+        assert seen == {'before': (mode, True), 'after': ('exact', False)}, (mode, seen)
