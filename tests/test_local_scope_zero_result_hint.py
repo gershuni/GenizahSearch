@@ -185,7 +185,7 @@ def test_start_search_hides_the_hint_before_running():
     assert 'self._set_local_scope_strip_visible(False)' in src
     # ...and does so before any worker is bound.
     assert (src.index('_set_local_scope_strip_visible(False)')
-            < src.index('_drain_previous_worker'))
+            < src.index('_free_search_slot'))
 
 
 def test_zero_result_branch_of_on_search_finished_evaluates_the_hint():
@@ -288,7 +288,7 @@ def test_block_is_set_before_the_running_check_and_cleared_after_the_query_guard
     assert i_block < i_running
     start = _top_level_statements(APP.start_search)
     i_unblock = next(i for i, s in enumerate(start) if '_local_scope_hint_blocked = False' in s)
-    i_drain = next(i for i, s in enumerate(start) if '_drain_previous_worker' in s)
+    i_drain = next(i for i, s in enumerate(start) if '_free_search_slot' in s)
     assert i_unblock < i_drain
 
 

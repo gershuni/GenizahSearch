@@ -96,7 +96,7 @@ def _pressing(monkeypatch, mode_idx, gap, lab=False):
     w.export_buttons, w._run_seq, w.is_searching = [], 0, False
     w.pre_search_restrict_sys_ids = w.refinement_restrict_sys_ids = None
     w._current_search_run = {"mode": "the previous run"}
-    w._drain_previous_worker.return_value = True
+    w._free_search_slot.return_value = True
     search, lab_search = MagicMock(name="SearchThread"), MagicMock(name="LabSearchThread")
     monkeypatch.setattr(genizah_app, "SearchThread", search)
     monkeypatch.setattr(genizah_app, "LabSearchThread", lab_search)
@@ -111,7 +111,7 @@ def test_a_gap_over_the_limit_is_refused_at_the_press(monkeypatch, notices, lang
     assert search.call_count == 0 and lab_search.call_count == 0, "a worker was built"
     assert w.is_searching is False
     w.btn_search.setText.assert_not_called()          # the button never turned into Stop
-    w._drain_previous_worker.assert_not_called()      # a running search is left alone
+    w._free_search_slot.assert_not_called()           # a running search is left alone
     assert w._current_search_run == {"mode": "the previous run"}
     w.gap_input.setText.assert_not_called()           # nothing clamped
 

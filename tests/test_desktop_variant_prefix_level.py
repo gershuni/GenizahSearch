@@ -3,7 +3,7 @@
 
 Runs the real GenizahGUI.start_search on a stub window (no QApplication), with
 the real VariantManager and the real preset/level methods bound to the stub.
-The run stops just after _drain_previous_worker and the variant level (applied
+The run stops just after _free_search_slot and the variant level (applied
 once the previous search has stopped), before any worker starts.
 """
 from __future__ import annotations
@@ -149,7 +149,7 @@ class _Host:
     def _update_variant_count_preview(self):
         pass
 
-    def _drain_previous_worker(self, *_a):
+    def _free_search_slot(self):
         self.reached_worker_start = True
         return True  # the previous search has stopped; the run stops at _launch
 
@@ -213,10 +213,10 @@ def test_a_preset_click_and_a_refused_start_leave_the_running_search_alone():
     assert host.var_mgr.get_variant_level() == 30
     assert host.lab_engine.settings.variant_max_changes == 2
 
-    def refused(*_a):
+    def refused():
         host.reached_worker_start = True
         return False
-    host._drain_previous_worker = refused
+    host._free_search_slot = refused
     host.start_search()
     assert host.reached_worker_start
     assert host.var_mgr.get_variant_level() == 30

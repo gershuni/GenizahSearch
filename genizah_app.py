@@ -53,6 +53,7 @@ from shared.search_engine import PHASE_LOCAL_SEARCH, MAX_WORD_GAP, _validate_wor
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from desktop.startup_work import StartupWork, shelfmark_completer_rows
 from desktop.search_scope import COMPOSITION, SEARCH, TABS, scope_of, scope_property, tab_for_index
+from desktop.search_run import search_run_of
 from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, CompoundCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
 from desktop.widgets import (
     text_has_pattern_markers,
@@ -24590,8 +24591,8 @@ class GenizahGUI(QMainWindow):
     def _drain_previous_worker(self, attr, ctx):
         """Refuse to rebind a worker slot while the old worker is still alive.
 
-        start_search / run_composition rebind self.search_thread / self.comp_thread
-        with no stop of the previous thread. The Search<->Stop toggle normally
+        run_composition rebinds self.comp_thread with no stop of the previous thread
+        (the Search tab no longer waits: _free_search_slot, GS-14). The Search<->Stop toggle normally
         makes that window ~zero, but a PAUSED worker lives indefinitely, and
         dropping the last reference to a live QThread is a hard crash
         ("QThread: Destroyed while thread is still running").
@@ -24609,18 +24610,25 @@ class GenizahGUI(QMainWindow):
         if prev.isRunning():
             # Do NOT rebind: two live workers would emit into the same window.
             logger.warning("previous %s still running; refusing to start a new run", attr)
-            _msg = tr("Still stopping the previous search — try again in a moment.")
-            # Report on whichever surface owns this run — composition has no status
-            # label, its progress bar is the status surface.
-            if ctx is getattr(self, '_pause_comp', None):
-                self.comp_progress.setVisible(True)
-                self.comp_progress.setFormat(_msg)
-            else:
-                self.status_label.setText(_msg)
+            # Composition (its only caller) has no status label: its progress bar is the status surface.
+            self.comp_progress.setVisible(True)
+            self.comp_progress.setFormat(tr("Still stopping the previous search — try again in a moment."))
             return False
         if ctx is not None:
             self._apply_pause_state(ctx, 'hidden')
             ctx.state = 'idle'
+        return True
+
+    def _free_search_slot(self):
+        """Room for a new run in search_thread, never waiting (GS-14; desktop/search_run.py)."""
+        run, current = search_run_of(self), getattr(self, 'search_thread', None)
+        if not run.can_start(current):
+            self.status_label.setText(tr("Still stopping the previous search — try again in a moment."))
+            return False
+        self._search_new_generation = getattr(self, '_search_new_generation', 0) + 1   # what the old run queued is dropped
+        run.discard(current)
+        self._apply_pause_state(self._pause_search, 'hidden')
+        self._pause_search.state = 'idle'
         return True
 
     def toggle_search(self):
@@ -24701,6 +24709,8 @@ class GenizahGUI(QMainWindow):
                     "Regex mode, which have no limit.").format(limit=MAX_WORD_GAP, gap=gap)
             _show_ok_notice(self, 'warning', tr("Word gap"), text)
             return
+        if not self._free_search_slot():   # GS-14: before this run's state is written (Codex on #147)
+            return
         # D-04: corpus from currentData() (fixed code), NEVER currentText() (translated label)
         _corpus = (
             (self.corpus_scope_combo.currentData() or 'genizah')
@@ -24728,11 +24738,7 @@ class GenizahGUI(QMainWindow):
             self._refinement_scope_sig = ''
             self._update_refinement_strip()
 
-        if not self._drain_previous_worker('search_thread', self._pause_search):
-            return
-        # The shared variant settings, set from the UI only now that the previous
-        # search has stopped: it read them as it went (and a refused start leaves
-        # them alone). Nothing else writes them while a search runs.
+        # The shared variant settings, from the UI (each run reads a copy: _run_engine below).
         if mode == 'variants' and self.var_mgr:
             pairs_count = self._get_current_variant_pairs_count()
             self.var_mgr.set_variant_level(pairs_count)
@@ -24837,7 +24843,10 @@ class GenizahGUI(QMainWindow):
             _run_catalog = (_catalog_options(self.chk_catalog_near.isChecked(),
                                              self.chk_catalog_translations.isChecked())
                             if mode == 'Catalog' else None)
-            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id, sources=_run_sources, catalog_options=_run_catalog)
+            # Its own variant settings: a stopped search may still expand words beside it (GS-14).
+            _run_variants = variant_settings_now(self._lab_settings(), getattr(self, 'var_mgr', None))
+            _run_engine = engine_with_variant_settings(self.searcher, self._lab_settings(), _run_variants)
+            self.search_thread = SearchThread(_run_engine, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id, sources=_run_sources, catalog_options=_run_catalog)
             # What this run searched, for the refinement step built from it: a replay
             # (session restore, a removed step, scope change) re-runs exactly this --
             # the widgets may have changed since, and the query lost its mode prefix.
@@ -24846,7 +24855,7 @@ class GenizahGUI(QMainWindow):
                 responsa_options=responsa_options, corpus_scope=_corpus_scope,
                 # The level and x1-x3 this run searched with (set above): a replay of
                 # its step searches with them, not with what a later search left.
-                variant_settings=variant_settings_now(self._lab_settings(), getattr(self, 'var_mgr', None)),
+                variant_settings=_run_variants,
                 # And the transcriptions it read (editions plan §3.3 item 8): a step replays them.
                 sources=_run_sources, catalog_options=_run_catalog,
                 # The mode it ran in (a history entry saves it with the switches above).
@@ -24891,7 +24900,7 @@ class GenizahGUI(QMainWindow):
         if hasattr(self.search_thread, 'preview_signal'):
             self.search_thread.preview_signal.connect(
                 _live(lambda rows, t=self.search_thread: self._on_search_preview(t, rows)))
-        self.search_thread.progress_signal.connect(self._on_search_progress)
+        self.search_thread.progress_signal.connect(_live(self._on_search_progress))
         if hasattr(self.search_thread, 'pause_ack_signal'):
             self.search_thread.pause_ack_signal.connect(
                 lambda rid, ep: self._on_pause_ack(self._pause_search, rid, ep))
@@ -24909,7 +24918,7 @@ class GenizahGUI(QMainWindow):
         _perf_corpus = self._current_search_run.get('corpus', 'genizah')
         if hasattr(self.search_thread, 'perf_signal'):
             self.search_thread.perf_signal.connect(
-                lambda ms, rc, m=_perf_mode, c=_perf_corpus: self._on_perf_signal(ms, rc, m, c)
+                _live(lambda ms, rc, m=_perf_mode, c=_perf_corpus: self._on_perf_signal(ms, rc, m, c))
             )
         self.search_thread.start()
 
@@ -25149,13 +25158,10 @@ class GenizahGUI(QMainWindow):
     def stop_search(self):
         self._apply_pause_state(self._pause_search, 'hidden')
         self._pause_search.state = 'idle'
-        if self.search_thread.isRunning():
-            self._search_was_cancelled = True
-            self.search_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
-            self.search_thread.wait(5000)
-            if self.search_thread.isRunning():
-                self.search_thread.terminate()
-                self.search_thread.wait()
+        current = getattr(self, 'search_thread', None)
+        if current is not None and current.isRunning():
+            self._search_was_cancelled = True   # before the stop: on_search_finished reads it
+        search_run_of(self).stop(current)   # GS-14: no wait, no terminate; partial results still arrive
         # Phase 114 USAGE-03: emit cancelled telemetry on user-stop.
         # _app_shutting_down guard (REVIEWS HIGH-2) is the first line of
         # _emit_search_telemetry, so this is safe to call unconditionally.
@@ -25236,11 +25242,7 @@ class GenizahGUI(QMainWindow):
             # CR-114-02: mirror stop_search — set _search_was_cancelled BEFORE cancel_flag
             # so any cooperative on_search_finished sees the cancellation flag.
             self._search_was_cancelled = True
-            self.search_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
-            self.search_thread.wait(3000)
-            if self.search_thread.isRunning():
-                self.search_thread.terminate()
-                self.search_thread.wait()
+            search_run_of(self).discard(self.search_thread)   # GS-14: not waited for, not terminated
             # Emit the cancelled event for this run.  The per-run emitted guard inside
             # _emit_search_telemetry makes this exactly-once even if a cooperative
             # on_search_finished also fires for the same run.
@@ -26613,7 +26615,7 @@ class GenizahGUI(QMainWindow):
             self._after_restore_replay = (upto, on_done)
             self.status_label.setText(tr('Restoring refinement chain...'))
             return
-        if not self._drain_previous_worker('search_thread', self._pause_search):
+        if not self._free_search_slot():
             return
         self._run_seq += 1
         run_id = self._run_seq
@@ -26658,7 +26660,7 @@ class GenizahGUI(QMainWindow):
         _live = partial(self._discardable, '_search_new_generation')
         thread.finished_signal.connect(_live(finished))
         thread.error_signal.connect(_live(failed))
-        thread.progress_signal.connect(self._on_search_progress)
+        thread.progress_signal.connect(_live(self._on_search_progress))
         thread.pause_ack_signal.connect(lambda rid, ep: self._on_pause_ack(self._pause_search, rid, ep))
         thread.start()
 
@@ -36569,6 +36571,8 @@ class GenizahGUI(QMainWindow):
             th = getattr(self, attr, None)
             if th is not None and th.isRunning() and name not in busy:
                 busy.append(name)
+        if search_run_of(self).running(getattr(self, 'search_thread', None)) and 'search' not in busy:
+            busy.append('search')         # a stopped search still finishing (GS-14)
         # The "Did you mean" checks (words_occur), every one still running: a newer
         # zero-result search can start one before an older one ends (Codex on #479).
         if any(th.isRunning() for th in list(getattr(self, '_layout_suggestion_workers', ()))):
@@ -38999,12 +39003,7 @@ class GenizahGUI(QMainWindow):
 
             self._stop_meta_loader_for_close()
 
-            if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
-                self.search_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
-                self.search_thread.wait(2000)
-                if self.search_thread.isRunning():
-                    self.search_thread.terminate()
-                    self.search_thread.wait()
+            search_run_of(self).discard(getattr(self, 'search_thread', None))   # GS-14: no wait
 
             if getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
                 self.comp_thread.requestInterruption()

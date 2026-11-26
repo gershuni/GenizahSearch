@@ -7,6 +7,10 @@ would burn its whole wait() budget and fall through to QThread.terminate() —
 on a thread holding a Tantivy searcher or a SQLite handle.
 
 That invariant is invisible at runtime until it bites, so it is pinned here.
+
+The Search tab's stop paths (Stop, New, Close) go through desktop/search_run.py
+(GS-14), which calls request_cancel() and never waits or terminates; its
+behaviour is tested in tests/test_search_run.py.
 """
 
 import inspect
@@ -23,14 +27,29 @@ STOP_PATHS = [
     '_reset_composition',
     'closeEvent',
 ]
+# Their search worker goes through SearchRun (request_cancel() is called there).
+SEARCH_STOP_PATHS = {'stop_search': 'stop', '_reset_search': 'discard', 'closeEvent': 'discard'}
 
 
-@pytest.mark.parametrize('method', STOP_PATHS)
+@pytest.mark.parametrize('method', [m for m in STOP_PATHS if m not in SEARCH_STOP_PATHS])
 def test_stop_path_uses_request_cancel(method):
     src = inspect.getsource(getattr(app.GenizahGUI, method))
     assert 'request_cancel()' in src, (
         '%s does not call request_cancel(); a paused worker would stay parked '
         'until the wait() budget expired and terminate() fired' % method)
+
+
+@pytest.mark.parametrize('method, call', sorted(SEARCH_STOP_PATHS.items()))
+def test_search_stop_paths_go_through_search_run(method, call):
+    src = inspect.getsource(getattr(app.GenizahGUI, method))
+    assert 'search_run_of(self).%s(' % call in src, method
+
+
+def test_nothing_waits_on_or_terminates_the_search_worker():
+    """GS-14: a search worker is never waited for on the UI thread nor terminated."""
+    src = inspect.getsource(app)
+    for bad in ('search_thread.wait(', 'search_thread.terminate('):
+        assert bad not in src, bad
 
 
 @pytest.mark.parametrize('method', STOP_PATHS)
@@ -51,7 +70,7 @@ def test_search_stop_preserves_the_cancelled_flag_ordering(method):
     """CR-114-02: _search_was_cancelled must be set BEFORE the cancel, so a
     cooperative on_search_finished sees it."""
     src = inspect.getsource(getattr(app.GenizahGUI, method))
-    assert src.index('_search_was_cancelled = True') < src.index('request_cancel()')
+    assert src.index('_search_was_cancelled = True') < src.index('search_run_of(self).')
 
 
 @pytest.mark.parametrize('method', STOP_PATHS[:-1])   # closeEvent has no UI left to paint
@@ -61,13 +80,16 @@ def test_stop_path_hides_the_pause_button(method):
     assert '_apply_pause_state' in src and "'hidden'" in src, method
 
 
-@pytest.mark.parametrize('method', ['start_search', 'run_composition'])
-def test_run_entry_points_refuse_to_rebind_a_live_worker(method):
-    """A paused worker lives indefinitely, and rebinding self.search_thread over
-    a live QThread drops its last reference — "QThread: Destroyed while thread is
-    still running", a hard crash."""
+@pytest.mark.parametrize('method, guard', [('start_search', '_free_search_slot'),
+                                           ('_complete_chain_then', '_free_search_slot'),
+                                           ('run_composition', '_drain_previous_worker')])
+def test_run_entry_points_refuse_to_rebind_a_live_worker(method, guard):
+    """A paused worker lives indefinitely, and rebinding the slot over a live
+    QThread drops its last reference — "QThread: Destroyed while thread is still
+    running", a hard crash. The Search tab's slot is freed by holding the old
+    worker until it ends (GS-14)."""
     src = inspect.getsource(getattr(app.GenizahGUI, method))
-    assert '_drain_previous_worker' in src, method
+    assert guard in src, method
 
 
 def test_drain_refuses_rather_than_rebinding_on_timeout():
@@ -95,6 +117,9 @@ def test_grouping_hides_the_pause_button():
 def test_close_event_no_longer_relies_on_the_no_op_interruption():
     """closeEvent called comp_thread.requestInterruption(), which the composition
     threads never polled. The mixin now routes that override into request_cancel,
-    but closeEvent should be reaching it through the shared entry point."""
+    but closeEvent should be reaching it through the shared entry point: for the
+    search worker that is SearchRun.discard (GS-14), which calls request_cancel()."""
     src = inspect.getsource(app.GenizahGUI.closeEvent)
-    assert 'request_cancel()' in src
+    assert 'search_run_of(self).discard(' in src
+    import desktop.search_run as search_run
+    assert 'request_cancel()' in inspect.getsource(search_run.SearchRun.discard)
