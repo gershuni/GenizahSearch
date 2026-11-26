@@ -147,7 +147,7 @@ from shared.reading_desk_model import (
 )
 from shared.editions_search import result_sys_ids, row_sys_ids
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion, only_partial, step_partial, saved_cutoff
-from shared.document_service import select_pgp_page_entry
+from shared.document_service import pgp_join_label, select_pgp_page_entry
 from shared.exclusion_service import (
     ExclusionSource, compute_excluded_ids,
     serialize_sources, deserialize_sources,
@@ -27703,6 +27703,11 @@ class GenizahGUI(QMainWindow):
                 snippet = f"{doc_type}: {desc[:120]}..."
             else:
                 snippet = doc_type
+            # A joined document's fragments all show its text: say which
+            # document and which fragment this row is ("PGP 7403 · 1/4").
+            join_label = pgp_join_label(r)
+            if join_label:
+                snippet = f"[{join_label}] {snippet}"
             formatted.append({
                 'display': {
                     'id': sid,

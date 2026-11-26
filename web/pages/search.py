@@ -80,6 +80,7 @@ from web.document_service import (
     get_sys_ids_with_transcriptions, get_sys_ids_with_pgp_text,
     get_fragments_by_tag, get_all_distinct_tags,
 )
+from shared.document_service import pgp_join_label
 from web.search_load_control import enrichment_batch_slot
 from web.research_jobs import (ResearchJobError, consume_editions_skipped, consume_time_limit_stop,
                                 run_research_call, shared_time_limit, with_request_settings)
@@ -7177,12 +7178,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 try:
                     _tag_show = _safe_get('show_translations', False)
                     if _tag_show:
-                        _tag_sids = [r.get('sys_id') for r in tag_results if r.get('sys_id')]
-                        if _tag_sids:
+                        # By the row's own PGP document: a fragment in two documents
+                        # would otherwise get whichever translation its sys_id hit first.
+                        _tag_pgpids = sorted({r.get('pgpid') for r in tag_results if r.get('pgpid')})
+                        if _tag_pgpids:
                             def _fetch_tag_trans():
                                 from shared.translation_service import TranslationService
                                 svc = TranslationService(thread_safe=True)
-                                result = svc.get_pgp_translations_by_sys_ids(_tag_sids) if svc.pgp_available() else {}
+                                result = svc.get_pgp_translations_batch(_tag_pgpids) if svc.pgp_available() else {}
                                 svc.close()
                                 return result
                             _tag_trans = await run.io_bound(_fetch_tag_trans)
@@ -7246,9 +7249,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         ui.label(result.get('shelfmark', 'Unknown')).classes(
                                             'font-bold break-all'
                                         ).style('color: var(--primary-700);')
+                                        # A joined document's fragments all show its text:
+                                        # say which document and which fragment this is.
+                                        _join_label = pgp_join_label(result)
+                                        if _join_label:
+                                            ui.label(_join_label).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                                'background: var(--bg-tertiary); color: var(--text-secondary); direction: ltr;'
+                                            )
 
                                     # Document type (with translation if available)
-                                    _tag_r_trans = _tag_trans.get(result.get('sys_id'), {}) if _tag_trans else {}
+                                    _tag_r_trans = _tag_trans.get(result.get('pgpid'), {}) if _tag_trans else {}
                                     _tag_doc_type = _tag_r_trans.get('document_type_he') or result.get('document_type')
                                     if _tag_doc_type:
                                         ui.label(_tag_doc_type).classes('text-xs').style(

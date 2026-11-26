@@ -473,6 +473,25 @@ class TestTagSearch:
         pgpids = {r['pgpid'] for r in results}
         assert 1234 in pgpids
 
+    def test_get_fragments_by_tag_join_order_and_position(self, pgp_service):
+        """A joined document's fragments come together, in order, each with its place."""
+        results = pgp_service.get_fragments_by_tag('letter')
+        rows = [(r['sys_id'], r['fragment_index'], r['fragment_count']) for r in results]
+        assert rows == [('003072766', 1, 3), ('003072767', 2, 3), ('003072768', 3, 3)]
+
+        single = pgp_service.get_fragments_by_tag('legal')
+        assert [(r['fragment_index'], r['fragment_count']) for r in single] == [(1, 1)]
+
+    def test_pgp_join_label(self, pgp_service):
+        """The label names the document and fragment for a join, nothing for one fragment."""
+        from shared.document_service import pgp_join_label
+        joined = pgp_service.get_fragments_by_tag('letter')
+        assert [pgp_join_label(r) for r in joined] == [
+            'PGP 1234 · 1/3', 'PGP 1234 · 2/3', 'PGP 1234 · 3/3']
+        single = pgp_service.get_fragments_by_tag('legal')
+        assert pgp_join_label(single[0]) == ''
+        assert pgp_join_label({}) == ''
+
     def test_get_fragments_by_tag_not_found(self, pgp_service):
         """Should return empty list for nonexistent tag."""
         results = pgp_service.get_fragments_by_tag('nonexistent_tag_xyz')

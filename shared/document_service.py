@@ -14,6 +14,7 @@ PGP document data from the local pgp.db SQLite sidecar:
 - get_translations_for_document(pgpid) -> list[dict]
 - get_sys_ids_with_transcriptions(sys_ids) -> set[str]
 - get_fragments_by_tag(tag) -> list[dict]
+- pgp_join_label(row) -> str
 - get_all_distinct_tags() -> list[str]
 - parse_transcription_sections(transcription) -> dict
 - get_section_for_page(transcription, page_num, sections) -> str | None
@@ -746,13 +747,16 @@ class PgpService:
         Get all fragments linked to PGP documents with a specific tag.
 
         Uses SQLite json_each() for efficient tag matching.
-        Returns fragment-level results (one per sys_id) with document metadata.
+        Returns one row per (document, fragment) pair with document metadata,
+        ordered by document and then fragment order. A fragment in two tagged
+        documents appears twice.
 
         Args:
             tag: Tag string to search for (e.g., "communal", "marriage")
 
         Returns:
-            List of dicts with sys_id, shelfmark, document_type, description, pgpid, transcription.
+            List of dicts with sys_id, shelfmark, document_type, description, pgpid,
+            transcription, and fragment_index / fragment_count (its place in the document).
             Returns empty list if not found or on error.
         """
         if not tag or not self._conn:
@@ -771,12 +775,14 @@ class PgpService:
             if not docs:
                 return []
 
-            # Step 2: Batch get all fragments for matching documents
+            # Step 2: Batch get all fragments for matching documents, ordered so
+            # the fragments of one joined document come together, in their order.
             doc_ids = [d['pgpid'] for d in docs]
             placeholders = ','.join('?' * len(doc_ids))
             frag_cursor = self._conn.execute(
                 f"SELECT sys_id, shelfmark, document_id FROM document_fragments "
-                f"WHERE document_id IN ({placeholders})",
+                f"WHERE document_id IN ({placeholders}) "
+                f"ORDER BY document_id, sequence_order, id",
                 doc_ids
             )
             frags = frag_cursor.fetchall()
@@ -784,18 +790,28 @@ class PgpService:
             if not frags:
                 return []
 
-            # Step 3: Join fragment info with document metadata
+            # Step 3: Join fragment info with document metadata. A join gives one
+            # row per fragment, all with the document's text, so each row also
+            # carries its place in the document (fragment_index of fragment_count).
             doc_map = {d['pgpid']: dict(d) for d in docs}
+            counts: Dict[int, int] = {}
+            for frag in frags:
+                counts[frag['document_id']] = counts.get(frag['document_id'], 0) + 1
+            seen: Dict[int, int] = {}
             results = []
             for frag in frags:
-                doc = doc_map.get(frag['document_id'], {})
+                doc_id = frag['document_id']
+                doc = doc_map.get(doc_id, {})
+                seen[doc_id] = seen.get(doc_id, 0) + 1
                 results.append({
                     'sys_id': frag['sys_id'],
                     'shelfmark': frag['shelfmark'],
                     'document_type': doc.get('document_type', ''),
                     'description': doc.get('description', ''),
-                    'pgpid': frag['document_id'],
+                    'pgpid': doc_id,
                     'transcription': doc.get('transcription', ''),
+                    'fragment_index': seen[doc_id],
+                    'fragment_count': counts[doc_id],
                 })
 
             return results
@@ -1444,17 +1460,31 @@ def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:
     Get all fragments linked to PGP documents with a specific tag.
 
     Uses SQLite json_each() for efficient tag matching.
-    Returns fragment-level results (one per sys_id) with document metadata.
+    Returns one row per (document, fragment) pair, the fragments of a document
+    together. See :meth:`PGPDocumentService.get_fragments_by_tag`.
 
     Args:
         tag: Tag string to search for (e.g., "communal", "marriage")
 
     Returns:
-        List of dicts with sys_id, shelfmark, document_type, description, pgpid, transcription.
+        List of dicts with sys_id, shelfmark, document_type, description, pgpid,
+        transcription, fragment_index, fragment_count.
         Returns empty list if not found or on error.
     """
     svc = get_pgp_service()
     return svc.get_fragments_by_tag(tag)
+
+
+def pgp_join_label(row: Dict[str, Any]) -> str:
+    """``"PGP 7403 · 1/4"`` for a tag-search row from a joined document, else ``""``.
+
+    The rows of a join all show the document's text; this says they are one
+    document and which fragment each row is.
+    """
+    count = row.get('fragment_count') or 0
+    if count < 2 or not row.get('pgpid'):
+        return ''
+    return f"PGP {row['pgpid']} · {row.get('fragment_index', 0)}/{count}"
 
 
 def get_all_distinct_tags() -> List[str]:
