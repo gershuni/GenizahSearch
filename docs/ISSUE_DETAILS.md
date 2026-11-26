@@ -141,21 +141,6 @@ Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
 
 *Triage 2026-10-25:* still open. desktop/widgets/__init__.py:50-80 still inserts '*...*' into the text (after replacing source asterisks with spaces); desktop/result_dialog.py:2731 _htmlify converts '*(.*?)*' to red bold unconditionally; no sentinel marker exists.
 
-## GS-11
-
-**Desktop: a stale `PGPBadgeWorker` can blank the PGP column of a table it never searched** · P2 · Desktop app · ❌ Open · opened 2026-09-03
-
-Where: `genizah_app.py::_on_pgp_badges_loaded`, _on_tag_search_results; PGPBadgeWorker
-
-Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
-
-- **Issue:** **Desktop: a stale `PGPBadgeWorker` can blank the PGP column of a table it never searched**
-- **File:** `genizah_app.py::_on_pgp_badges_loaded` (the slot), `_reset_search`, `_on_tag_search_results` (the PGP-tag path), `gui_threads.py::PGPBadgeWorker`
-- **Status:** ❌ Open (found 2026-09-03 by an audit of the PGP-link commit; **pre-dates it**)
-- **Notes:** The slot carries no run token, and only regular-search → regular-search waits for the worker. A large search followed by a PGP-tag search lets the late reply overwrite the tag search's PGP set and repaint, blanking badges and links on rows that have PGP data; `_reset_search` neither clears `_pgp_transcription_sys_ids` nor drains the worker. Fix: stamp each badge worker with a search generation and drop stale replies. Full text archived 2026-10-06.
-
-*Triage 2026-10-25:* still open. genizah_app.py:25687-25695 _on_pgp_badges_loaded takes no run token and overwrites _pgp_transcription_sys_ids; the only waiter for the worker is the regular-search launch (24950-24954, the sole _pgp_badge_worker use besides init at 1643); the PGP-tag path sets the set directly at 25921 without draining or cancelling the worker.
-
 ## GS-12
 
 **Desktop Lab Mode composition silently ignores Focus Search** · P2 · Desktop app · ❌ Open · opened 2026-09-03
@@ -170,21 +155,6 @@ Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
 - **Notes:** `LabCompositionThread` takes no `restrict_sys_ids` and the Lab branch of `run_composition` passes none (the standard branch does), so with Lab Mode on the composition Focus Search button is enabled and reports a scope that the Lab engine never receives. Fix: thread `restrict_sys_ids` into the Lab engine, or disable the button while Lab Mode is on; do not leave it enabled and ignored. Full text archived 2026-10-19.
 
 *Triage 2026-10-25:* still open. desktop/gui_threads.py:1213-1216 LabCompositionThread.__init__ has no restrict_sys_ids parameter; the Lab branch of run_composition (genizah_app.py:30523-30543) passes none; btn_comp_pre_search_filters (genizah_app.py:6721-6731) is never disabled for Lab Mode.
-
-## GS-13
-
-**Desktop: Focus Search is still ONE scope shared by the Search tab and the Composition tab** · P2 · Desktop app · ❌ Open · opened 2026-09-03
-
-Where: `genizah_app.py::_open_pre_search_filter_dialog`, pre_search_restrict_sys_ids
-
-Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
-
-- **Issue:** **Desktop: Focus Search is still ONE scope shared by the Search tab and the Composition tab**
-- **File:** `genizah_app.py::_open_pre_search_filter_dialog` (:18555), wired from `btn_pre_search_filters` (:5135) and `btn_comp_pre_search_filters` (:5508)
-- **Status:** ❌ Open (found 2026-09-03 alongside the exclusion split)
-- **Notes:** Both buttons call one handler and write one `self.pre_search_restrict_sys_ids`, which has 17 write sites; most visibly, `_reset_search` and `_reset_composition` each clear the other tab's scope, so "New" on either tab drops the other's Focus Search. Fix: the exclusion-split pattern (un-prefixed names for Search, a `comp_` twin, accessors). Full text archived 2026-10-19.
-
-*Triage 2026-10-25:* still open. Both buttons connect to _open_pre_search_filter_dialog (genizah_app.py:6287, 6724), which writes the single self.pre_search_restrict_sys_ids (22308); that attribute has 17 plain-assignment write sites including the resets at 22561 and 30235; no comp_ twin exists.
 
 ## GS-14
 

@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-25 (archived GS-312). 189 open: P1 0, P2 41, P3 148.
+> **Last Updated:** 2026-11-26 (archived GS-11, GS-13). 187 open: P1 0, P2 39, P3 148.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -24,7 +24,7 @@ the private repository; grep only).
 |------|------|------|------|------|
 | Search | 0 | 4 | 22 | 26 |
 | Browse and viewer | 0 | 3 | 6 | 9 |
-| Desktop app | 0 | 9 | 31 | 40 |
+| Desktop app | 0 | 7 | 31 | 38 |
 | Website | 0 | 5 | 29 | 34 |
 | API and AI | 0 | 2 | 2 | 4 |
 | Discovery | 0 | 2 | 11 | 13 |
@@ -33,7 +33,7 @@ the private repository; grep only).
 | Build, CI and tests | 0 | 0 | 5 | 5 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 3 | 1 | 4 |
-| **Total** | **0** | **41** | **148** | **189** |
+| **Total** | **0** | **39** | **148** | **187** |
 
 ## P1 - Critical
 
@@ -64,9 +64,7 @@ _None open._
 |----|-------|-------|--------|--------|
 | [GS-9](ISSUE_DETAILS.md#gs-9) | Desktop Search export, filters and counts see only the loaded rows | `genizah_app.py::export_results`, _collect_sorted_results, load_next_batch | 2026-09-25 | ❌ Open |
 | [GS-10](ISSUE_DETAILS.md#gs-10) | The `*` search-hit marker is in-band, so a literal asterisk in source text is still ambiguous | `desktop/widgets/__init__.py::mark_pattern_hits`, `desktop/result_dialog.py::_htmlify` | 2026-09-03 | ❌ Open |
-| [GS-11](ISSUE_DETAILS.md#gs-11) | Desktop: a stale `PGPBadgeWorker` can blank the PGP column of a table it never searched | `genizah_app.py::_on_pgp_badges_loaded`, _on_tag_search_results; PGPBadgeWorker | 2026-09-03 | ❌ Open |
 | [GS-12](ISSUE_DETAILS.md#gs-12) | Desktop Lab Mode composition silently ignores Focus Search | `genizah_app.py::run_composition` (Lab branch), `desktop/gui_threads.py::LabCompositionThread` | 2026-09-03 | ❌ Open |
-| [GS-13](ISSUE_DETAILS.md#gs-13) | Desktop: Focus Search is still ONE scope shared by the Search tab and the Composition tab | `genizah_app.py::_open_pre_search_filter_dialog`, pre_search_restrict_sys_ids | 2026-09-03 | ❌ Open |
 | [GS-14](ISSUE_DETAILS.md#gs-14) | Stop blocks the UI thread and can still hard-kill a worker | `genizah_app.py::stop_search` (+5 sibling stop paths) | 2026-08-19 | ❌ Open |
 | [GS-15](ISSUE_DETAILS.md#gs-15) | `btn_comp_run` renames itself after the first run | `genizah_app.py:5399` vs `:21532`, `:22373` | 2026-08-19 | ❌ Open |
 | [GS-16](ISSUE_DETAILS.md#gs-16) | A disabled button with an inline `background-color` does not look disabled | `genizah_app.py:4598-4599` (`btn_search`), repo-wide pattern | 2026-08-19 | ❌ Open |
