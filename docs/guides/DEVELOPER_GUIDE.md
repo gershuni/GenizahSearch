@@ -296,6 +296,11 @@ The project uses GitHub Actions for CI. The workflow is defined in `.github/work
 | `lint-and-docs` | `ubuntu-latest` | Installs `ruff==0.15.10`, runs `ruff check .`, runs `python scripts/check_docs.py` |
 | `tests` | `ubuntu-latest` + `windows-latest` | Installs from `requirements-lock.txt`, runs `pytest tests/` |
 
+`.github/workflows/dependency-audit.yml` runs `pip-audit` on the pinned versions: for a PR that
+changes a `requirements*.txt`, and every Monday in the public repository. GitHub's alerts are read by
+`scripts/check_security_alerts.py` (from `scripts/init.ps1` and before a release); an alert is fixed,
+or dismissed on GitHub with a reason.
+
 The `tests` job depends on `lint-and-docs` -- tests only run if lint and docs checks pass first.
 
 Both test runners use Python 3.11 (matching the pinned dependency set).

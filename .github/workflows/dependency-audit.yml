@@ -1,0 +1,48 @@
+name: dependency audit
+
+# Known vulnerabilities in the pinned versions (pip-audit, PyPI's advisories). GitHub's own
+# alerts are on the public repository only, where nobody works, and reached 179 before
+# anyone looked.
+# - A PR that changes a requirements file: the versions it pins must be clean.
+# - Every Monday, in the public repository (its minutes are free): a new advisory against an
+#   unchanged pin fails the run, and GitHub mails the owner.
+# A workflow of its own, not a step in ci.yml's lint-and-docs: that one gates publishing, and
+# an advisory published overnight must not stop an unrelated change.
+#
+# An advisory that has no fix, or does not apply, gets `--ignore-vuln <ID>` below, with the
+# reason in a comment above it.
+on:
+  pull_request:
+    paths:
+      - 'requirements*.txt'
+      - '.github/workflows/dependency-audit.yml'
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ format('{0}-{1}', github.workflow, github.event.pull_request.number || github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == 1 }}
+
+jobs:
+  dependency-audit:
+    if: github.event_name != 'schedule' || github.repository == 'gershuni/GenizahSearch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: pip install pip-audit==2.10.1  # Pinned -- update version intentionally
+      # Both files pin every package exactly, so nothing is installed or resolved.
+      # requirements.txt is held to the lock by tests/test_requirements_pinned_like_lock.py.
+      # Platform markers are cut first: pip-audit skips a pin whose marker is false on
+      # this runner, and pywin32 (sys_platform == "win32") ships with the desktop app.
+      - run: |
+          sed 's/;.*$//' requirements-lock.txt > "$RUNNER_TEMP/lock.txt"
+          sed 's/;.*$//' requirements-atlas-bake.txt > "$RUNNER_TEMP/atlas.txt"
+          pip-audit --no-deps --disable-pip -r "$RUNNER_TEMP/lock.txt" -r "$RUNNER_TEMP/atlas.txt"

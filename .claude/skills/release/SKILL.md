@@ -93,6 +93,10 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
     <(grep -v '^#' requirements-lock.txt | sed 's/==.*//' | tr '[:upper:]' '[:lower:]' | sort -u)
   ```
   If anything prints, those packages are in `requirements.txt` but absent from the lock file — block the release until they're added to `requirements-lock.txt`. (v7.14.0 hit this: pymupdf was in `requirements.txt` but missing from the lock, so CI failed post-push.)
+- **Security alerts:** `python scripts/check_security_alerts.py`. Exit 1 is a BLOCKER: each alert it
+  names is fixed, or dismissed on GitHub with a reason, with the owner's approval, before the release.
+  Alerts "waiting for a publish" are closed by the release itself. Exit 2 means not checked: sign in
+  (`gh auth login`) and run it again.
 - No `TODO(release)` or `FIXME(urgent)` markers in recently changed files
 - `OPEN_ISSUES.md` — any critical/blocking issues still open?
 - Grep for `print(` debug statements in recently committed code (last 5 commits)
@@ -213,6 +217,7 @@ RELEASE CHECKLIST — vX.Y.Z
 [ ] tests/lane_durations.json folded from the last public CI run (or: no artifacts left)
 [ ] ruff explicit pass (python -m ruff check .)
 [ ] requirements.txt ↔ requirements-lock.txt diff is empty (CI uses the lock file; missing deps break CI)
+[ ] scripts/check_security_alerts.py exits 0 (or the owner accepted what is left)
 [ ] No uncommitted changes (besides release changes)
 [ ] Translations present for new UI strings
 

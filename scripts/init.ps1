@@ -121,6 +121,23 @@ if (Test-Path $oi) {
     }
 }
 
+# ----------------------------------------------------- security alerts ----
+# The alerts live on the public repository, where no session works, so they are read here
+# (scripts/check_security_alerts.py; about 4 seconds). "NOT CHECKED" is not a pass.
+Section "Security alerts (public repository)"
+if ($NoGates) {
+    Write-Host "  skipped (-NoGates)"
+} else {
+    $env:PYTHONUTF8 = '1'
+    $alerts = @(python scripts\check_security_alerts.py)
+    $alertsExit = $LASTEXITCODE
+    $alertsColor = if ($alertsExit -eq 0) { 'Green' } elseif ($alertsExit -eq 2) { 'Yellow' } else { 'Red' }
+    $alerts | ForEach-Object { Write-Host $_ -ForegroundColor $alertsColor }
+    if ($alertsExit -ne 0) {
+        Write-Host "  Tell the owner, whatever this session is about: nothing else reports these." -ForegroundColor $alertsColor
+    }
+}
+
 # ------------------------------------------------------- working notes ----
 Section "Most recent working notes (_tmp/, untracked)"
 if (Test-Path '_tmp') {
