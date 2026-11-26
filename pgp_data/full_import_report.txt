@@ -1,35 +1,35 @@
 ============================================================
 Full PGP Import Verification Report
 ============================================================
-Generated: 2026-09-22T10:10:25.012788
+Generated: 2026-11-26T16:53:17.847236
 
 Table Row Counts (Before -> After):
 --------------------------------------------------
-  documents                :   36,642 ->   36,642 (delta: +0)
-  document_fragments       :   37,413 ->   37,413 (delta: +0)
-  document_sources         :   10,389 ->   10,389 (delta: +0)
-  document_footnotes       :   23,754 ->   23,754 (delta: +0)
+  documents                :   36,642 ->   37,029 (delta: +387)
+  document_fragments       :   37,413 ->   37,876 (delta: +463)
+  document_sources         :   10,389 ->   10,632 (delta: +243)
+  document_footnotes       :   23,754 ->   24,094 (delta: +340)
 
 Records Prepared Per Pass:
 --------------------------------------------------
-  Pass 1 - Documents:            36,298
-  Pass 2 - Document Sources:     10,037
-  Pass 3 - Footnotes:            23,634
-  Pass 4 - Fragment Links:       36,870
+  Pass 1 - Documents:            36,580
+  Pass 2 - Document Sources:     10,207
+  Pass 3 - Footnotes:            23,899
+  Pass 4 - Fragment Links:       37,206
 
 Source Statistics:
 --------------------------------------------------
-  Digital Editions:      7,984
-  Digital Translations:  2,049
-    Hebrew:                763
-    English:             1,286
+  Digital Editions:      8,087
+  Digital Translations:  2,116
+    Hebrew:                769
+    English:             1,347
 
 Issues:
 --------------------------------------------------
-  Total issues: 2,381
-    missing_doc_relation: 226
-    unmatched_fragment: 2,155
+  Total issues: 2,406
+    missing_doc_relation: 233
+    unmatched_fragment: 2,173
 
 Success Rate:
-  Total records attempted: 106,839
-  Total new/updated rows:  0
+  Total records attempted: 107,892
+  Total new/updated rows:  1,433

@@ -31,12 +31,15 @@ logger = get_logger(__name__)
 #   images                   NLI + Cambridge + Manchester + JTS image/manifest records
 #   scholarly_transcriptions DISTINCT manuscripts: PGP %Edition% ∪ FGP 'Digital Edition'
 #   automatic_transcriptions DISTINCT manuscripts in the deduped GENIZAH browse_map
-# scholarly_transcriptions re-verified 2026-10-28 against the v9.11.0 FGP sidecar (gate-4 candidate caeacabf).
+# scholarly_transcriptions re-verified 2026-10-28 against the v9.11.0 FGP sidecar (gate-4 candidate caeacabf),
+# and 2026-11-26 after the PGP refresh (upstream 8879d566). compute_live_stats() reads the
+# FIRST pgp.db that get_pgp_service finds: a stale %LOCALAPPDATA%\GenizahSearchPro\data copy
+# wins over the repository's pgp_data/, and returned the old 33,050 that day.
 CORPUS_STATS: Dict[str, int] = {
     "manuscripts": 255_723,
     "catalog_entries": 731_354,
     "images": 1_019_886,
-    "scholarly_transcriptions": 33_050,
+    "scholarly_transcriptions": 33_129,
     "automatic_transcriptions": 232_450,
 }
 

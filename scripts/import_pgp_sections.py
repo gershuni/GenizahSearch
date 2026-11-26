@@ -410,17 +410,29 @@ def execute_updates(client: Client, updates: List[Dict]) -> int:
     for i in tqdm(range(0, len(updates), BATCH_SIZE), desc="Updating sections"):
         batch = updates[i:i + BATCH_SIZE]
         for record in batch:
-            try:
-                client.table('document_sources').update({
-                    'sections': record['sections'],
-                    'source_language': record.get('source_language'),
-                    'source_direction': record.get('source_direction'),
-                }).eq('id', record['id']).execute()
-                processed += 1
-            except Exception as e:
-                errors += 1
-                if errors <= 5:
-                    print(f"  Error updating id={record['id']} pgpid={record['pgpid']}: {e}")
+            # One retry: the server closes an HTTP/2 connection after 10,000 requests
+            # (GOAWAY, last_stream_id 19999), so the 10,000th update failed on every run
+            # (2026-11-26, document_sources id 1016). The next request reconnects.
+            for attempt in (1, 2):
+                try:
+                    resp = client.table('document_sources').update({
+                        'sections': record['sections'],
+                        'source_language': record.get('source_language'),
+                        'source_direction': record.get('source_direction'),
+                    }).eq('id', record['id']).execute()
+                    # PostgREST answers an update that matched no row -- the row is gone, or
+                    # the key may not write it (RLS) -- with success and an empty list.
+                    # Only a returned row proves the update was applied.
+                    if not getattr(resp, 'data', None):
+                        raise RuntimeError("the update matched no row (missing, or not writable with this key)")
+                    processed += 1
+                    break
+                except Exception as e:
+                    if attempt == 1:
+                        continue
+                    errors += 1
+                    if errors <= 5:
+                        print(f"  Error updating id={record['id']} pgpid={record['pgpid']}: {e}")
 
     if errors:
         print(f"  {errors} errors during update")
@@ -677,7 +689,15 @@ def main(dry_run: bool = True, skip_clone: bool = False):
         processed = execute_updates(client, updates)
         print(f"  Processed {processed:,} updates")
         print()
-        print("IMPORT COMPLETE")
+        # An update that raised (a dropped HTTP/2 connection on 2026-11-26) left that row's
+        # sections stale while the run exited 0, and refresh_pgp_data.ps1 went on to export.
+        # Updates are idempotent: re-running this script is the repair.
+        failed = len(updates) - processed
+        if failed:
+            print(f"IMPORT INCOMPLETE: {failed:,} of {len(updates):,} updates failed. "
+                  f"Re-run with --execute (updates are idempotent).")
+        else:
+            print("IMPORT COMPLETE")
 
     # Write verification report
     print()
@@ -685,6 +705,8 @@ def main(dry_run: bool = True, skip_clone: bool = False):
     write_verification_report(pgpid_files, stats, updates, report_path, dry_run)
     print("Done.")
 
+    if not dry_run and len(updates) != processed:
+        return 1
     return 0
 
 

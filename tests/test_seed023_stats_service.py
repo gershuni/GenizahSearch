@@ -21,7 +21,9 @@ _EXPECTED = {
     # 866 rows, of which these are the Edition-relation ones. 27,593 -> 33,046 with the
     # v9.11.0 FGP sidecar (2026-10-27): editions read from FGP's own files; 33,050 on its
     # 2026-10-28 rebuild (the Yerushalmi team's Word files add 4 manuscripts).
-    "scholarly_transcriptions": 33_050,
+    # 33,050 -> 33,129 on the 2026-11-26 PGP refresh (upstream 8879d566): PGP editions
+    # now reach 7,501 manuscripts (was 7,415), 79 of them not already counted from FGP.
+    "scholarly_transcriptions": 33_129,
     "automatic_transcriptions": 232_450,
 }
 
