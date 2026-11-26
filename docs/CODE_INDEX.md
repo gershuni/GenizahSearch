@@ -1863,6 +1863,16 @@ Tests: `tests/test_startup_work.py`.
 
 - **Function** `pick_shelfmark_option(parent, options)` — the numbered "Multiple shelfmarks found" picker (from `browse_load`), shared by the Puzzle add box, the Joins dialog's fragment B and Share a Discovery; `None` = cancelled.
 
+## desktop/search_scope.py
+
+Focus Search, one scope per tab (GS-13): the Search and Composition tabs each have their own pre-search filters, the manuscripts they allow and the state of the lookup that computes them. No Qt; the main window does the UI work.
+
+- **Class** `SearchScope` — `filters`, `restrict_sys_ids` (None = every manuscript), `error` (#17), `lookup_gen` / `lookup_pending` (K-14), `rerun` / `rerun_custom_text` (a run waiting for the lookup), `worker`.
+    - Methods `has_filters`, `cancel_rerun`, `supersede`, `begin_lookup`, `lookup_failed`, `clear` (New).
+- **Function** `scope_of(window, tab)` — the tab's scope, made on first use (works on windows built without `__init__` and on test hosts).
+- **Function** `scope_property(tab, field)` — `GenizahGUI.pre_search_filters` / `pre_search_restrict_sys_ids` (Search) and their `comp_` twins (Composition).
+- **Function** `tab_for_index(index)` — 0 Search, 1 Composition (the catalogue hand-off).
+
 ## desktop/dialogs_filter.py
 
 - **Class** `ExcludeDialog` (Line 21) — Collect system IDs or shelfmarks that should be excluded from searches. "From the shelf" (shelf picker PR 4; `purpose=`, `shelf_service=`, `shelf_store=`, passed by `genizah_app.py::open_exclude_dialog` per surface: `search_exclude` / `composition_exclude`): "Pick from the shelf" while the tree is served, and the shelf's sources listed above the tabs with Remove (shown without the tree too). The picker's confirm stages one `shelf_exclusion_source` of the picked ids (`_take_from_shelf`, corpus ids only, answering `STAGED`); shelf sources are never written into the text editor (its Apply reads the shelfmark column again through the shelf map) and `get_exclusion_sources()` returns them with either tab's sources; `done(Accepted)` consumes the staged ids from the pending choice (not those chosen again during the confirm, `_note_chosen_again`), any other close keeps it. Clear All also clears the From List selection and the shelf's sources; an edit after Resolve forgets the resolution (`_forget_resolution`), so Apply reads the editor again.

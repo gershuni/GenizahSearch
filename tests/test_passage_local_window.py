@@ -354,7 +354,7 @@ def test_the_genizah_window_words_a_cancel_with_an_index_as_a_cancel(
 
 class _KeyWin:
     _comp_witness_cache_key = APP._comp_witness_cache_key
-    pre_search_restrict_sys_ids = None
+    comp_pre_search_restrict_sys_ids = None
 
     class _Spin:
         def value(self):

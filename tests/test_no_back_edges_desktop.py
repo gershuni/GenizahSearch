@@ -89,6 +89,7 @@ DESKTOP_MODULES = [
     "desktop/startup_tips.py",           # one tip at each start, 2026-10-25
     "desktop/marks_legend.py",           # the Genuzot marks legend "?", 2026-10-27 (GS-274)
     "desktop/version_history.py",        # What's New in every version + update notes, 2026-11-05
+    "desktop/search_scope.py",           # Focus Search, one scope per tab (GS-13), 2026-11-26
     # 2026-09-25: one running copy per data folder.
     "desktop/single_instance.py",
     "desktop/shelfmark_picker.py",      # catalogue-shelfmark plan, 2026-10-18

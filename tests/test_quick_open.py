@@ -22,6 +22,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PyQt6.QtWidgets import QApplication, QLineEdit, QPlainTextEdit, QTabWidget, QWidget
 
+from desktop.search_scope import scope_of  # noqa: E402
 from genizah_app import GenizahGUI
 from shared.quick_open import has_hebrew_or_arabic_letter, quick_open_target
 
@@ -784,7 +785,7 @@ def _queue_search_from(w, widget):
     start_search and a picked history entry queue it)."""
     widget.setFocus()
     w._deferred_search_focus = w.focusWidget()
-    w._rerun_search_after_filter = True
+    scope_of(w).rerun = True
 
 
 def test_a_search_that_waited_for_the_filters_keeps_where_it_was_asked_for():
@@ -845,7 +846,7 @@ def test_search_end_and_corner_button_wiring():
     snapshot = history[history.index("if results:"):history.index("if filter_pending:")]
     assert snapshot.index("self._focus_at_search_start = picked_from") < snapshot.index(
         "self.on_search_finished(results)")
-    queued = history[history.index("if filter_pending:"):history.index("self._rerun_search_after_filter = True")]
+    queued = history[history.index("if filter_pending:"):history.index("scope_of(self, SEARCH).rerun = True")]
     assert "self._deferred_search_focus = picked_from" in queued
     assert "self._focus_at_search_start" not in queued
     # The first shown row may come with the rest of the first page.

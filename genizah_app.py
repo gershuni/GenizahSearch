@@ -52,6 +52,7 @@ from shared.responsa import _MAX_GAP_TOKEN
 from shared.search_engine import PHASE_LOCAL_SEARCH, MAX_WORD_GAP, _validate_word_gap
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from desktop.startup_work import StartupWork, shelfmark_completer_rows
+from desktop.search_scope import COMPOSITION, SEARCH, TABS, scope_of, scope_property, tab_for_index
 from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, CompoundCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
 from desktop.widgets import (
     text_has_pattern_markers,
@@ -1902,6 +1903,11 @@ def _new_shelfmark_completer(model, keys, parent):
 
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
+    # Focus Search, one scope per tab (GS-13; desktop/search_scope.py).
+    pre_search_filters = scope_property(SEARCH, 'filters')
+    pre_search_restrict_sys_ids = scope_property(SEARCH, 'restrict_sys_ids')
+    comp_pre_search_filters = scope_property(COMPOSITION, 'filters')
+    comp_pre_search_restrict_sys_ids = scope_property(COMPOSITION, 'restrict_sys_ids')
     browse_thumb_resolved = pyqtSignal(str, object)
     # Phase 146: a passage build runs off the UI thread but the release of
     # the live index must happen ON it (`close_passage_state`'s ownership
@@ -2036,16 +2042,7 @@ class GenizahGUI(QMainWindow):
         # What is chosen on the shelf and not applied yet, per purpose (shelf picker PR 4, D12):
         # kept in the session file until applied or cleared.
         self._shelf_selections = shelf_picker.SelectionStore(on_change=self._schedule_session_save)
-        # Pre-search filter state (Phase 45-03)
-        self.pre_search_filters = {}  # dict: domain, author, work, date_from, date_to, material_exclude
-        self.pre_search_restrict_sys_ids = None  # computed set or None
-        # #17: why the last pre-search lookup could not run (a FilterUnavailable
-        # reason or 'error'), and whether one is still running (K-14). Every
-        # READ uses getattr with a default: tests build this window with
-        # GenizahGUI.__new__, so __init__ may never have run.
-        self._pre_search_filter_error = None
-        self._filter_lookup_gen = 0
-        self._filter_lookup_pending = False
+        # Pre-search filter state (Phase 45-03): one scope per tab, made by _scope on first use.
         # Phase 57: Visual Similarity restriction state
         self._vs_restrict_sys_ids = None
         self._vs_restrict_label = ''
@@ -3203,7 +3200,7 @@ class GenizahGUI(QMainWindow):
         criteria, drawn with English values before, get them."""
         if CURRENT_LANG != 'he':
             return
-        if (getattr(self, 'pre_search_filters', None) or {}).get('criteria'):
+        if any(scope_of(self, t).filters.get('criteria') for t in TABS):
             self._update_filter_chip_bar()
         if getattr(self, '_catalog_criteria', None) and hasattr(self, '_catalog_chips_layout'):
             self._catalog_update_chips()
@@ -6883,7 +6880,7 @@ class GenizahGUI(QMainWindow):
         self.btn_pre_search_filters = QPushButton(tr("Focus Search"))
         self.btn_pre_search_filters.setToolTip(tr("Narrow search scope by domain, author, date, material"))
         self.btn_pre_search_filters.setStyleSheet("padding: 2px 8px;")
-        self.btn_pre_search_filters.clicked.connect(self._open_pre_search_filter_dialog)
+        self.btn_pre_search_filters.clicked.connect(lambda _c=False: self._open_pre_search_filter_dialog(SEARCH))
 
         # Phase 56: Exclude Manuscripts button for main search
         self.btn_main_exclude = QPushButton(tr("Exclude Manuscripts"))
@@ -7348,7 +7345,8 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_pre_search_filters = QPushButton(tr("Focus Search"))
         self.btn_comp_pre_search_filters.setToolTip(tr("Narrow search scope by domain, author, date, material"))
         self.btn_comp_pre_search_filters.setStyleSheet("padding: 2px 8px;")
-        self.btn_comp_pre_search_filters.clicked.connect(self._open_pre_search_filter_dialog)
+        self.btn_comp_pre_search_filters.clicked.connect(
+            lambda _c=False: self._open_pre_search_filter_dialog(COMPOSITION))
 
         # The buttons after the title wrap as a group (the title field keeps
         # stretching): on a small screen they used to push "Found N results"
@@ -13965,9 +13963,11 @@ class GenizahGUI(QMainWindow):
         if reason:
             QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(reason))
             return
-        self._supersede_filter_lookup()
-        self.pre_search_filters = filters
-        self.pre_search_restrict_sys_ids = restrict
+        scope_tab = tab_for_index(tab)     # Search in results / Parallels in results
+        scope = scope_of(self, scope_tab)
+        self._supersede_filter_lookup(scope_tab)
+        scope.filters = filters
+        scope.restrict_sys_ids = restrict
         # GAP-H / DMF-07: library filter handoff -- Show-only carries the allowlist;
         # Hide mode SUPPRESSES the restriction (Codex HIGH #4: do NOT invert a Hide-set
         # into an include-list; the full-corpus complement is out of scope for restrict_sys_ids).
@@ -13981,10 +13981,10 @@ class GenizahGUI(QMainWindow):
                         "library filter %s resolved to empty on the hand-off -- skipping (fail-open)",
                         selection,
                     )
-                elif self.pre_search_restrict_sys_ids is None:
-                    self.pre_search_restrict_sys_ids = set(library_ids)
+                elif scope.restrict_sys_ids is None:
+                    scope.restrict_sys_ids = set(library_ids)
                 else:
-                    self.pre_search_restrict_sys_ids &= library_ids
+                    scope.restrict_sys_ids &= library_ids
             else:
                 self.statusBar().showMessage(
                     tr("Library Hide filter not applied to search/composition"), 5000
@@ -21237,7 +21237,7 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Conditions"),
                                 self._compound_problem_text(problems[0]))
             return None
-        restrict = getattr(self, 'pre_search_restrict_sys_ids', None)
+        restrict = getattr(self, 'comp_pre_search_restrict_sys_ids', None)
         fingerprint = compound_query.fingerprint(
             [t for _w, _l, t in main_list], conditions, {
                 'scope': scope, 'width': width, 'length': length,
@@ -22969,7 +22969,7 @@ class GenizahGUI(QMainWindow):
         Deliberately EXCLUDES the render cap: it is applied once to the fused
         list, after these rows exist, so it cannot change them.
         """
-        restrict = getattr(self, 'pre_search_restrict_sys_ids', None)
+        restrict = getattr(self, 'comp_pre_search_restrict_sys_ids', None)
         # The generation of each index THIS scope searches, and only those:
         # a Genizah rebuild must not throw away a My Library run's rows, nor
         # the reverse (`scope_pins` gives None for an index not searched).
@@ -23834,33 +23834,39 @@ class GenizahGUI(QMainWindow):
 
     # ---- Pre-search filter methods (Phase 45-03) ----
 
-    def _open_pre_search_filter_dialog(self):
-        """Open the pre-search filter dialog."""
-        dlg = PreSearchFilterDialog(self, current_filters=self.pre_search_filters)
+    def _open_pre_search_filter_dialog(self, tab=SEARCH):
+        """Open the pre-search filter dialog for ``tab``."""
+        scope = scope_of(self, tab)
+        dlg = PreSearchFilterDialog(self, current_filters=scope.filters)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             # The dialog accepts only a scope it computed (#17: OK stays
             # disabled while its count failed), so it replaces any running
             # lookup and any earlier error.
-            self._supersede_filter_lookup()
-            self.pre_search_filters = dlg.get_filters()
-            self.pre_search_restrict_sys_ids = dlg.get_restrict_sys_ids()
-            # Phase 55: Stale detection (D-16)
-            if self.refinement_chain:
-                new_sig = scope_signature(self.pre_search_restrict_sys_ids)
-                if new_sig != self._refinement_scope_sig:
-                    self._refinement_stale = True
-                    self._forget_chain_sets()
-                    if hasattr(self, '_update_refinement_strip'):
-                        self._update_refinement_strip()
+            self._supersede_filter_lookup(tab)
+            scope.filters = dlg.get_filters()
+            scope.restrict_sys_ids = dlg.get_restrict_sys_ids()
+            self._mark_refinement_if_rescoped(tab)
             self._update_filter_chip_bar()
             self._schedule_session_save()
 
+    def _mark_refinement_if_rescoped(self, tab):
+        """Phase 55 stale detection (D-16): a refinement chain built on another Search scope."""
+        if tab == SEARCH and self.refinement_chain:
+            if scope_signature(self.pre_search_restrict_sys_ids) != self._refinement_scope_sig:
+                self._refinement_stale = True
+                self._forget_chain_sets()
+                if hasattr(self, '_update_refinement_strip'):
+                    self._update_refinement_strip()
+
     def _update_filter_chip_bar(self):
-        """Update both search and composition chip bars to reflect active filters."""
-        for chip_bar, chip_layout, count_label in [
-            (self.filter_chip_bar, self.filter_chip_bar_layout, self.filter_chip_count_label),
-            (self.comp_filter_chip_bar, self.comp_filter_chip_bar_layout, self.comp_filter_chip_count_label),
+        """Update the search and composition chip bars, each from its own tab's filters."""
+        for chip_bar, chip_layout, count_label, tab in [
+            (self.filter_chip_bar, self.filter_chip_bar_layout, self.filter_chip_count_label, SEARCH),
+            (self.comp_filter_chip_bar, self.comp_filter_chip_bar_layout, self.comp_filter_chip_count_label,
+             COMPOSITION),
         ]:
+            scope = scope_of(self, tab)
+            add_chip = partial(self._add_filter_chip, chip_layout, tab=tab)
             # Clear existing chips (keep the count label and stretch)
             while chip_layout.count() > 0:
                 item = chip_layout.takeAt(0)
@@ -23868,7 +23874,7 @@ class GenizahGUI(QMainWindow):
                 if w:
                     w.deleteLater()
 
-            filters = self.pre_search_filters
+            filters = scope.filters
             if not filters:
                 chip_bar.setVisible(False)
                 continue
@@ -23912,28 +23918,28 @@ class GenizahGUI(QMainWindow):
                     pass  # UI population failed; continue with available data
             for d in filters.get('domains', []):
                 display = domain_display_map.get(str(d), str(d))
-                self._add_filter_chip(chip_layout, tr("Domain") + ": " + display, ('domains', d))
+                add_chip(tr("Domain") + ": " + display, ('domains', d))
             # Legacy single-value fallback
             if filters.get('domain') and not filters.get('domains'):
                 _d_legacy = str(filters['domain'])
                 display = domain_display_map.get(_d_legacy, _d_legacy)
-                self._add_filter_chip(chip_layout, tr("Domain") + ": " + display, ('domains', filters['domain']))
+                add_chip(tr("Domain") + ": " + display, ('domains', filters['domain']))
 
             # Author chips (multi-select: per-item)
             for a in filters.get('authors', []):
                 display = str(a)
-                self._add_filter_chip(chip_layout, tr("Author") + ": " + display, ('authors', a))
+                add_chip(tr("Author") + ": " + display, ('authors', a))
             if filters.get('author') and not filters.get('authors'):
                 author_display = filters.get('author_name') or str(filters['author'])
-                self._add_filter_chip(chip_layout, tr("Author") + ": " + author_display, ('authors', filters['author']))
+                add_chip(tr("Author") + ": " + author_display, ('authors', filters['author']))
 
             # Work chips (multi-select: per-item)
             for w in filters.get('works', []):
                 display = str(w)
-                self._add_filter_chip(chip_layout, tr("Work") + ": " + display, ('works', w))
+                add_chip(tr("Work") + ": " + display, ('works', w))
             if filters.get('work') and not filters.get('works'):
                 work_display = filters.get('work_name') or str(filters['work'])
-                self._add_filter_chip(chip_layout, tr("Work") + ": " + work_display, ('works', filters['work']))
+                add_chip(tr("Work") + ": " + work_display, ('works', filters['work']))
 
             # Library chip (SEED-026 smoke 2026-06-29): collapse the per-code chips into a
             # SINGLE summary chip "Library (N)" — a catalog handoff can carry many libraries
@@ -23943,35 +23949,34 @@ class GenizahGUI(QMainWindow):
             # and removable (GAP-H intent) without the clutter.
             _lib_codes = filters.get('library', [])
             if _lib_codes:
-                self._add_filter_chip(
-                    chip_layout, tr("Library") + f" ({len(_lib_codes)})", 'library'
+                add_chip(tr("Library") + f" ({len(_lib_codes)})", 'library'
                 )
 
             if filters.get('material_exclude'):
-                self._add_filter_chip(chip_layout, tr("Exclude Printed"), 'material_exclude')
+                add_chip(tr("Exclude Printed"), 'material_exclude')
 
             # Manuscript features: one chip per criterion
             if filters.get('criteria'):
                 from desktop.dialogs_filter import criteria_chip_texts
                 for _ckey, _ctext in criteria_chip_texts(filters['criteria']):
-                    self._add_filter_chip(chip_layout, _ctext, ('criteria', _ckey))
+                    add_chip(_ctext, ('criteria', _ckey))
 
             # Text filter chips
             for t in filters.get('text_all', []):
-                self._add_filter_chip(chip_layout, f"+ {t}", ('text_all', t))
+                add_chip(f"+ {t}", ('text_all', t))
             for t in filters.get('text_any', []):
-                self._add_filter_chip(chip_layout, f"~ {t}", ('text_any', t))
+                add_chip(f"~ {t}", ('text_any', t))
             for t in filters.get('text_not', []):
-                self._add_filter_chip(chip_layout, f"- {t}", ('text_not', t))
+                add_chip(f"- {t}", ('text_not', t))
 
             # Count label
-            restrict = self.pre_search_restrict_sys_ids
+            restrict = scope.restrict_sys_ids
             new_count_label = QLabel("")
             new_count_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #2980b9;")
             if restrict is not None:
                 count_str = f"{len(restrict):,}"
                 new_count_label.setText(f"{count_str} {tr('manuscripts')}")
-            elif getattr(self, '_pre_search_filter_error', None) and any(
+            elif scope.error and any(
                     k != 'include_mode' for k in filters):
                 # #17: the lookup could not run -- not "all manuscripts".
                 new_count_label.setText(tr("Could not update filter count"))
@@ -23979,7 +23984,7 @@ class GenizahGUI(QMainWindow):
             chip_layout.addWidget(new_count_label)
             chip_layout.addStretch()
 
-    def _add_filter_chip(self, layout, text, filter_key):
+    def _add_filter_chip(self, layout, text, filter_key, tab=SEARCH):
         """Add a removable chip button to the filter chip bar layout."""
         chip = QPushButton(f"{text}  \u00d7")
         chip.setFlat(True)
@@ -23990,46 +23995,47 @@ class GenizahGUI(QMainWindow):
             "QPushButton:hover { background: #d2e3fc; }"
         )
         chip.setToolTip(tr("Click to remove this filter"))
-        chip.clicked.connect(lambda checked=False, fk=filter_key: self._remove_filter(fk))
+        chip.clicked.connect(lambda checked=False, fk=filter_key: self._remove_filter(fk, tab))
         layout.addWidget(chip)
 
-    def _remove_filter(self, filter_key):
-        """Remove a single filter and recompute restrict_sys_ids."""
+    def _remove_filter(self, filter_key, tab=SEARCH):
+        """Remove a single filter of ``tab`` and recompute its restrict_sys_ids."""
+        scope = scope_of(self, tab)
+        filters = scope.filters
         if isinstance(filter_key, tuple) and filter_key[0] == 'criteria':
             # One manuscript feature (its chip)
-            criteria = dict(self.pre_search_filters.get('criteria') or {})
+            criteria = dict(filters.get('criteria') or {})
             criteria.pop(filter_key[1], None)
             if criteria:
-                self.pre_search_filters['criteria'] = criteria
+                filters['criteria'] = criteria
             else:
-                self.pre_search_filters.pop('criteria', None)
+                filters.pop('criteria', None)
         elif isinstance(filter_key, tuple):
             # Multi-select: remove individual item from list
             field, value = filter_key
-            if field in self.pre_search_filters and isinstance(self.pre_search_filters[field], list):
-                if value in self.pre_search_filters[field]:
-                    self.pre_search_filters[field].remove(value)
-                if not self.pre_search_filters[field]:
-                    del self.pre_search_filters[field]
+            if field in filters and isinstance(filters[field], list):
+                if value in filters[field]:
+                    filters[field].remove(value)
+                if not filters[field]:
+                    del filters[field]
             else:
-                self.pre_search_filters.pop(field, None)
+                filters.pop(field, None)
         else:
-            self.pre_search_filters.pop(filter_key, None)
+            filters.pop(filter_key, None)
 
         # Check if any real filters remain (not just include_mode)
-        has_real = any(k != 'include_mode' for k in self.pre_search_filters)
-        if has_real:
+        if scope.has_filters():
             # FINDING 2 (129-07): pass meta_mgr so the worker can intersect
             # filters['library'] into the recomputed set (preserves library
             # restriction after non-library chip removal).
-            worker = FilterCountWorker(self.pre_search_filters, meta_mgr=self.meta_mgr)
-            self._connect_filter_worker(worker, self._on_filter_recompute_finished)
-            self._filter_recompute_worker = worker
+            worker = FilterCountWorker(filters, meta_mgr=self.meta_mgr)
+            self._connect_filter_worker(
+                worker, lambda result: self._on_filter_recompute_finished(result, tab), tab)
             worker.start()
         else:
-            self._supersede_filter_lookup()
-            self.pre_search_filters = {}
-            self.pre_search_restrict_sys_ids = None
+            self._supersede_filter_lookup(tab)
+            scope.filters = {}
+            scope.restrict_sys_ids = None
             self._update_filter_chip_bar()
             self._schedule_session_save()
 
@@ -24045,103 +24051,83 @@ class GenizahGUI(QMainWindow):
         return tr("The catalog data these filters need is not available, so the search "
                   "was not run. Remove the filters with Focus Search to search.")
 
-    def _supersede_filter_lookup(self):
-        """The pre-search filters were just replaced by a known scope (dialog
-        OK, catalog hand-off, last chip removed, New): a lookup still running
-        for the OLD filters must neither re-scope nor block, and the old
-        error no longer applies. A search or composition that was waiting for
-        that lookup is cancelled, and the status bar says so: it was asked for
-        under the old filters, and left armed it would start when some later,
-        unrelated lookup answers."""
-        self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
-        self._filter_lookup_pending = False
-        self._pre_search_filter_error = None
-        was_waiting = (getattr(self, '_rerun_search_after_filter', False)
-                       or getattr(self, '_rerun_comp_after_filter', False))
-        self._rerun_search_after_filter = False
-        self._rerun_comp_after_filter = False
-        self._rerun_comp_custom_text = None
-        if was_waiting:
+    def _supersede_filter_lookup(self, tab=SEARCH):
+        """``tab``'s pre-search filters were just replaced by a known scope (dialog
+        OK, catalog hand-off, last chip removed): a lookup still running for the
+        OLD filters must neither re-scope nor block, and the old error no longer
+        applies. A run of that tab waiting for the lookup is cancelled, and the
+        status bar says so: it was asked for under the old filters, and left armed
+        it would start when some later, unrelated lookup answers."""
+        if scope_of(self, tab).supersede():
             self.statusBar().showMessage(tr("Search cancelled"), 8000)
 
-    def _connect_filter_worker(self, worker, on_finished):
-        """Connect a FilterCountWorker so only the NEWEST one counts.
+    def _connect_filter_worker(self, worker, on_finished, tab=SEARCH):
+        """Connect a FilterCountWorker for ``tab`` so only its NEWEST one counts.
 
         A superseded worker's answer or failure is ignored, so it can neither
-        re-scope nor block. Until the newest one answers, Search and
-        Composition wait for it (K-14) instead of running on the old or None
-        scope.
+        re-scope nor block. Until the newest one answers, that tab's runs wait
+        for it (K-14) instead of running on the old or None scope.
         """
-        self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
-        gen = self._filter_lookup_gen
-        self._filter_lookup_pending = True
+        scope = scope_of(self, tab)
+        gen = scope.begin_lookup(worker)
 
         def _on_worker_finished(result, g=gen):
-            if g != getattr(self, '_filter_lookup_gen', 0):
+            if g != scope.lookup_gen:
                 return
-            self._filter_lookup_pending = False
-            self._pre_search_filter_error = None
+            scope.lookup_pending = False
+            scope.error = None
             on_finished(result)
 
         def _on_worker_failed(reason, g=gen):
-            if g != getattr(self, '_filter_lookup_gen', 0):
+            if g != scope.lookup_gen:
                 return
-            self._filter_lookup_pending = False
-            self._on_filter_lookup_failed(reason)
+            self._on_filter_lookup_failed(reason, tab)
 
         worker.finished.connect(_on_worker_finished)
         worker.failed.connect(_on_worker_failed)
 
-    def _on_filter_lookup_failed(self, reason):
+    def _on_filter_lookup_failed(self, reason, tab=SEARCH):
         """A pre-search recompute could not run. Keep the chips, show the
-        error, and block searches until the filters change -- never run with
-        a stale or None scope."""
-        self._pre_search_filter_error = reason or 'error'
-        self.pre_search_restrict_sys_ids = None
-        was_waiting = (getattr(self, '_rerun_search_after_filter', False)
-                       or getattr(self, '_rerun_comp_after_filter', False))
-        self._rerun_search_after_filter = False
-        self._rerun_comp_after_filter = False
-        self._rerun_comp_custom_text = None
-        if was_waiting:
+        error, and block that tab's runs until its filters change -- never run
+        with a stale or None scope."""
+        if scope_of(self, tab).lookup_failed(reason):
             QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(reason))
         self._update_filter_chip_bar()
 
     def _pre_search_filters_blocked(self, rerun=None, custom_text=None) -> bool:
-        """True when a search must not start now because of its filters.
+        """True when a run must not start now because of its tab's filters
+        (``rerun`` 'composition' for the Composition tab, else the Search tab).
 
-        - A lookup is still running (K-14): the run is deferred -- ``rerun``
-          'search' or 'composition' arms the re-run that fires when the
-          lookup answers (``custom_text`` is kept for a composition).
+        - A lookup is still running (K-14): the run is deferred and starts when
+          the lookup answers (``custom_text`` is kept for a composition).
         - The last lookup could not run (#17): the user is told, and nothing
           runs until the filters change.
         Filters with nothing but include_mode never block.
         """
-        filters = getattr(self, 'pre_search_filters', None) or {}
-        if not any(k != 'include_mode' for k in filters):
+        scope = scope_of(self, COMPOSITION if rerun == 'composition' else SEARCH)
+        if not scope.has_filters():
             return False
-        if getattr(self, '_filter_lookup_pending', False):
-            if rerun == 'composition':
-                self._rerun_comp_after_filter = True
-                self._rerun_comp_custom_text = custom_text
-            else:
-                self._rerun_search_after_filter = True
+        if scope.lookup_pending:
+            scope.rerun = True
+            scope.rerun_custom_text = custom_text if rerun == 'composition' else None
             self.statusBar().showMessage(
                 tr("The filters are still being applied; the search will start as soon "
                    "as they are ready."), 8000)
             return True
-        reason = getattr(self, '_pre_search_filter_error', None)
-        if reason:
-            QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(reason))
+        if scope.error:
+            QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(scope.error))
             return True
         return False
 
-    def _run_deferred_after_filter(self):
-        """Run the search and the composition that waited for a filter lookup --
-        both, when both were pressed while it ran: each was told it would start,
-        and one left armed would start at some later, unrelated lookup."""
-        if getattr(self, '_rerun_search_after_filter', False):
-            self._rerun_search_after_filter = False
+    def _run_deferred_after_filter(self, tab=SEARCH):
+        """Run ``tab``'s search or composition that waited for its filter lookup:
+        it was told it would start, and left armed it would start at some later,
+        unrelated lookup."""
+        scope = scope_of(self, tab)
+        custom_text = scope.rerun_custom_text
+        if not scope.cancel_rerun():
+            return
+        if tab == SEARCH:
             if self.query_input.text().strip() and not getattr(self, 'is_searching', False):
                 # Where the cursor was when this search was asked for (Search
                 # pressed, or a history entry picked), not where the user put
@@ -24149,42 +24135,33 @@ class GenizahGUI(QMainWindow):
                 asked_from = getattr(self, '_deferred_search_focus', None)
                 self.start_search()
                 self._focus_at_search_start = asked_from
-        if getattr(self, '_rerun_comp_after_filter', False):
-            self._rerun_comp_after_filter = False
-            custom_text = getattr(self, '_rerun_comp_custom_text', None)
-            self._rerun_comp_custom_text = None
-            if self.comp_text_area.toPlainText().strip() and not getattr(self, 'is_comp_running', False):
-                if custom_text is not None:
-                    self.run_composition(custom_text=custom_text)
-                else:
-                    self.run_composition()
+        elif self.comp_text_area.toPlainText().strip() and not getattr(self, 'is_comp_running', False):
+            if custom_text is not None:
+                self.run_composition(custom_text=custom_text)
+            else:
+                self.run_composition()
 
-    def _on_filter_recompute_finished(self, result_set):
+    def _on_filter_recompute_finished(self, result_set, tab=SEARCH):
         """Handle recomputed filter set after chip removal."""
-        self._pre_search_filter_error = None
-        self.pre_search_restrict_sys_ids = result_set
-        # Phase 55: Stale detection (D-16)
-        if self.refinement_chain:
-            new_sig = scope_signature(self.pre_search_restrict_sys_ids)
-            if new_sig != self._refinement_scope_sig:
-                self._refinement_stale = True
-                self._forget_chain_sets()
-                if hasattr(self, '_update_refinement_strip'):
-                    self._update_refinement_strip()
+        scope = scope_of(self, tab)
+        scope.error = None
+        scope.restrict_sys_ids = result_set
+        self._mark_refinement_if_rescoped(tab)
         self._update_filter_chip_bar()
         self._schedule_session_save()
-        # K-14: a search started while this lookup ran waited for it.
-        self._run_deferred_after_filter()
+        # K-14: a run started while this lookup ran waited for it.
+        self._run_deferred_after_filter(tab)
 
-    def _on_restore_filter_finished(self, result_set):
+    def _on_restore_filter_finished(self, result_set, tab=SEARCH):
         """Handle filter recompute after session/history restore."""
-        self._pre_search_filter_error = None
-        self.pre_search_restrict_sys_ids = result_set
+        scope = scope_of(self, tab)
+        scope.error = None
+        scope.restrict_sys_ids = result_set
         self._update_filter_chip_bar()
-        # History re-use: run the deferred search now that pre-search filters
+        # History re-use: run the deferred run now that the pre-search filters
         # have resolved (set by _restore_*_from_state when re-running, or by
-        # a search started while the lookup ran -- K-14).
-        self._run_deferred_after_filter()
+        # a run started while the lookup ran -- K-14).
+        self._run_deferred_after_filter(tab)
 
     def _exclude_word_search_result(self, sys_id, row):
         """Exclude a manuscript -- every row of it -- from the search results.
@@ -25318,20 +25295,10 @@ class GenizahGUI(QMainWindow):
         # 8. Clear per-result word exclusions
         self.word_excluded_sys_ids = set()
 
-        # 9. Clear pre-search filter state (domain, author, work filters)
-        # #17: a lookup still running for the old filters must not
-        # re-scope or block the cleared state, and a search or composition
-        # waiting for it is cancelled (the same fields as
-        # _supersede_filter_lookup; assigned here because the reset also
-        # runs on hosts that borrow only these methods).
-        self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
-        self._filter_lookup_pending = False
-        self._pre_search_filter_error = None
-        self._rerun_search_after_filter = False
-        self._rerun_comp_after_filter = False
-        self._rerun_comp_custom_text = None
-        self.pre_search_filters = {}
-        self.pre_search_restrict_sys_ids = None
+        # 9. Clear this tab's pre-search filters only (GS-13). #17: a lookup still
+        # running for them must not re-scope or block, and a search waiting for it
+        # is cancelled.
+        scope_of(self, SEARCH).clear()
         self._update_filter_chip_bar()
 
         # 9a. Phase 55: Clear refinement chain state
@@ -32210,20 +32177,10 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_domain_filter.setEnabled(False)
         self.lbl_comp_domain_filter.setVisible(False)
 
-        # 9. Clear pre-search filter state (shared)
-        # #17: a lookup still running for the old filters must not
-        # re-scope or block the cleared state, and a search or composition
-        # waiting for it is cancelled (the same fields as
-        # _supersede_filter_lookup; assigned here because the reset also
-        # runs on hosts that borrow only these methods).
-        self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
-        self._filter_lookup_pending = False
-        self._pre_search_filter_error = None
-        self._rerun_search_after_filter = False
-        self._rerun_comp_after_filter = False
-        self._rerun_comp_custom_text = None
-        self.pre_search_filters = {}
-        self.pre_search_restrict_sys_ids = None
+        # 9. Clear this tab's pre-search filters only (GS-13). #17: a lookup still
+        # running for them must not re-scope or block, and a composition waiting
+        # for it is cancelled.
+        scope_of(self, COMPOSITION).clear()
         self._update_filter_chip_bar()
 
         # 10. Disable export buttons
@@ -32617,7 +32574,7 @@ class GenizahGUI(QMainWindow):
                     _comp_conditions,
                     filter_text=self._get_filter_text(),
                     restrict_sys_ids=getattr(
-                        self, 'pre_search_restrict_sys_ids', None),
+                        self, 'comp_pre_search_restrict_sys_ids', None),
                     corpus_scope=_comp_scope,
                     run_id=_comp_run_id,
                     pinned_generation=(
@@ -32640,7 +32597,7 @@ class GenizahGUI(QMainWindow):
                     filter_text=self._get_filter_text(),
                     threshold=self.spin_filter.value(),
                     restrict_sys_ids=getattr(
-                        self, 'pre_search_restrict_sys_ids', None),
+                        self, 'comp_pre_search_restrict_sys_ids', None),
                     corpus_scope=_comp_scope,
                     run_id=_comp_run_id,
                     # Pinned HERE, on the UI thread, before the worker can
@@ -32671,7 +32628,7 @@ class GenizahGUI(QMainWindow):
                     boundary_boost=boundary_boost,
                     min_boundary_matches=_comp_min_boundary,
                     min_delimiter_distance=min_delimiter_distance,
-                    restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None),
+                    restrict_sys_ids=getattr(self, 'comp_pre_search_restrict_sys_ids', None),
                     corpus_scope=_comp_scope,
                     run_id=_comp_run_id
                 )
@@ -37423,7 +37380,6 @@ class GenizahGUI(QMainWindow):
                 worker = FilterCountWorker(psf, meta_mgr=self.meta_mgr)
                 self._connect_filter_worker(worker, self._on_restore_filter_finished)
                 worker.start()
-                self._filter_restore_worker = worker
                 filter_pending = True
             else:
                 self._supersede_filter_lookup()
@@ -37452,7 +37408,7 @@ class GenizahGUI(QMainWindow):
         # worker, defer the run to _on_restore_filter_finished; else run now.
         if filter_pending:
             self._deferred_search_focus = picked_from
-            self._rerun_search_after_filter = True
+            scope_of(self, SEARCH).rerun = True
         elif self.query_input.text().strip() and not getattr(self, 'is_searching', False):
             self.start_search()
         self._schedule_session_save()
@@ -37513,18 +37469,18 @@ class GenizahGUI(QMainWindow):
             # Restore pre-search filters, as they run today (a copy).
             psf, old_measurements = self._migrate_saved_pre_search_filters(
                 entry.get('pre_search_filters'))
-            self.pre_search_filters = psf
+            self.comp_pre_search_filters = psf
             if psf and any(k != 'include_mode' for k in psf):
                 # FINDING 2 (129-07): pass meta_mgr so library restriction is
                 # preserved across composition history restore.
                 worker = FilterCountWorker(psf, meta_mgr=self.meta_mgr)
-                self._connect_filter_worker(worker, self._on_restore_filter_finished)
+                self._connect_filter_worker(
+                    worker, lambda result: self._on_restore_filter_finished(result, COMPOSITION), COMPOSITION)
                 worker.start()
-                self._filter_restore_worker = worker
                 filter_pending = True
             else:
-                self._supersede_filter_lookup()
-                self.pre_search_restrict_sys_ids = None
+                self._supersede_filter_lookup(COMPOSITION)
+                self.comp_pre_search_restrict_sys_ids = None
             self._update_filter_chip_bar()
 
         self._comp_domain_exclusions = set(state.get('domain_exclusions', []))
@@ -37557,7 +37513,7 @@ class GenizahGUI(QMainWindow):
 
         # Re-run the composition search (source text already restored above).
         if filter_pending:
-            self._rerun_comp_after_filter = True
+            scope_of(self, COMPOSITION).rerun = True
         elif self.comp_text_area.toPlainText().strip() and not getattr(self, 'is_comp_running', False):
             self.run_composition()
         self._schedule_session_save()
@@ -37706,7 +37662,7 @@ class GenizahGUI(QMainWindow):
                 'comp_conditions': list(getattr(
                     self, '_comp_last_result_conditions', None) or []),
             },
-            'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
+            'pre_search_filters': dict(getattr(self, 'comp_pre_search_filters', {})),
             # NOTE: result snapshots intentionally NOT stored (see
             # _add_regular_search_to_history). source_text is kept so clicking
             # the entry can re-run the composition search.
@@ -38023,8 +37979,10 @@ class GenizahGUI(QMainWindow):
                     'appendix_threshold': self.spin_filter.value() if hasattr(self, 'spin_filter') else 5,
                 },
                 'was_interrupted': getattr(self, 'is_comp_running', False),
-                # Pre-search filters (Phase 45-03) -- shared across search/composition
+                # Pre-search filters (Phase 45-03), one set per tab (GS-13); a session file
+                # from before that has the one shared set, which restores to Search.
                 'pre_search_filters': getattr(self, 'pre_search_filters', {}),
+                'comp_pre_search_filters': getattr(self, 'comp_pre_search_filters', {}),
                 # D20 criteria; the old 'post_measurement_filters' are not restored (R2).
                 'post_criteria': getattr(self, '_post_criteria', {}),
                 'word_excluded_sys_ids': sorted(getattr(self, 'word_excluded_sys_ids', set())),
@@ -38210,11 +38168,18 @@ class GenizahGUI(QMainWindow):
             # not shown (R2) -- they were found with a filter no longer shown.
             _restored_pre_search, _old_measurements = self._migrate_saved_pre_search_filters(
                 state.get('pre_search_filters'))
-            if _old_measurements:
+            _restored_comp_pre_search, _comp_old_measurements = self._migrate_saved_pre_search_filters(
+                state.get('comp_pre_search_filters'))
+            if 'comp_pre_search_filters' not in state:
+                # Saved before GS-13: the one shared set found both tabs' rows.
+                _comp_old_measurements = _old_measurements
+            if _old_measurements or _comp_old_measurements:
                 state = dict(state)
-                reg = state['regular_search'] = dict(reg, results=[])
-                comp = state['composition_search'] = dict(
-                    comp, results=[], filtered_results=[], summary_text='')
+                if _old_measurements:     # each tab's rows go only with its own filters
+                    reg = state['regular_search'] = dict(reg, results=[])
+                if _comp_old_measurements:
+                    comp = state['composition_search'] = dict(
+                        comp, results=[], filtered_results=[], summary_text='')
                 self._restore_notice(tr(
                     "The saved results were found with filters that have changed. "
                     "Search again to see them."))
@@ -38524,19 +38489,18 @@ class GenizahGUI(QMainWindow):
             # measurement bound the open catalog is KNOWN not to have (never
             # just because the catalog is missing), with one notice.
             # (Migrated at the top of this restore, before the stored rows.)
-            self.pre_search_filters = _restored_pre_search
-            if self.pre_search_filters:
-                # Recompute restrict_sys_ids from saved filters.
-                # FINDING 2 (129-07): pass meta_mgr so library restriction is
-                # preserved across session restore. Until it answers, Search
-                # and Composition wait for it (K-14); if it cannot run, they
-                # are blocked with a message (#17).
-                worker = FilterCountWorker(self.pre_search_filters, meta_mgr=self.meta_mgr)
-                self._connect_filter_worker(worker, self._on_restore_filter_finished)
-                self._restore_filter_worker = worker
-                worker.start()
-            else:
-                self._update_filter_chip_bar()
+            # Each tab's, recomputed from its saved filters. FINDING 2 (129-07): pass
+            # meta_mgr so library restriction is preserved across session restore.
+            # Until a tab's lookup answers its runs wait for it (K-14); if it cannot
+            # run, they are blocked with a message (#17).
+            for _tab, _saved in ((SEARCH, _restored_pre_search), (COMPOSITION, _restored_comp_pre_search)):
+                scope_of(self, _tab).filters = _saved
+                if _saved:
+                    worker = FilterCountWorker(_saved, meta_mgr=self.meta_mgr)
+                    self._connect_filter_worker(
+                        worker, partial(self._on_restore_filter_finished, tab=_tab), _tab)
+                    worker.start()
+            self._update_filter_chip_bar()
 
             # Restore active tab
             active_tab_idx = state.get('active_tab')

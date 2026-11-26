@@ -6,7 +6,8 @@ GenizahGUI.__new__ (the pattern tests/test_exclusion_surfaces.py uses), so
 __init__ never runs. Covers the catalog hand-offs, the failure slot for the
 FilterCountWorker, the search and composition gates, stale workers, and
 (K-14) a search pressed while the filter lookup is still running: it waits
-for the lookup and runs on ITS answer, never on the old or None scope.
+for the lookup and runs on ITS answer, never on the old or None scope. Each
+tab has its own Focus Search and lookup (GS-13, desktop/search_scope.py).
 
 No test lets an exception escape a slot invoked by a signal (PyQt6 aborts
 the process on that); the stubs past each gate are called directly.
@@ -29,6 +30,7 @@ _app = QApplication.instance() or QApplication([])
 
 import genizah_app  # noqa: E402
 from genizah_app import GenizahGUI  # noqa: E402
+from desktop.search_scope import COMPOSITION, SEARCH, scope_of  # noqa: E402
 from shared import fjms_service  # noqa: E402
 from shared.fjms_service import FjmsService  # noqa: E402
 
@@ -123,18 +125,19 @@ def test_catalog_hand_off_that_works_still_scopes(monkeypatch, tmp_path, warned)
 
 # -- the failure slot --
 
-def test_lookup_failure_cancels_both_deferred_reruns(warned):
+def test_a_lookup_failure_cancels_its_own_tabs_waiting_run_only(warned):
+    """GS-13: each tab has its own lookup. The Search tab's failing cancels the
+    search waiting for it, and leaves the composition waiting for its own."""
     w = _bare_window()
     w.pre_search_filters = {'criteria': dict(REGION)}
     w.pre_search_restrict_sys_ids = {'990001'}
-    w._rerun_search_after_filter = True
-    w._rerun_comp_after_filter = True
-    w._on_filter_lookup_failed('query_failed')
-    assert w._pre_search_filter_error == 'query_failed'
+    search, comp = scope_of(w, SEARCH), scope_of(w, COMPOSITION)
+    search.rerun = comp.rerun = True
+    w._on_filter_lookup_failed('query_failed', SEARCH)
+    assert search.error == 'query_failed'
     assert w.pre_search_restrict_sys_ids is None
-    assert w._rerun_search_after_filter is False
-    assert w._rerun_comp_after_filter is False, (
-        "a composition history re-run stayed armed and fires on the next recompute")
+    assert search.rerun is False
+    assert comp.rerun is True and comp.error is None, "the Composition tab's wait was not the Search tab's"
     assert len(warned) == 1
 
 
@@ -154,7 +157,7 @@ def test_a_superseded_worker_cannot_block_or_rescope(warned):
     new.finished.emit({'990001'})
     old.failed.emit('query_failed')
     old.finished.emit({'990777'})
-    assert getattr(w, '_pre_search_filter_error', None) is None
+    assert scope_of(w).error is None
     assert w.pre_search_restrict_sys_ids == {'990001'}
 
 
@@ -165,8 +168,7 @@ def _search_window(error):
     w.query_input = QLineEdit("word")
     w.pre_search_filters = {'criteria': dict(REGION)}
     w.pre_search_restrict_sys_ids = None
-    if error is not None:
-        w._pre_search_filter_error = error
+    scope_of(w).error = error
 
     def _past_the_gate(*a, **k):
         raise _Stop()
@@ -184,8 +186,8 @@ def test_search_does_not_run_while_its_filters_could_not_be_applied(warned):
 
 
 def test_search_gate_tolerates_a_window_built_without_init(warned):
-    """test_exclusion_surfaces builds its window without __init__, so the
-    error flag may not exist; the gate must read it with a default."""
+    """test_exclusion_surfaces builds its window without __init__: the scopes
+    are made on first use."""
     w = _search_window(None)
     with pytest.raises(_Stop):
         w.start_search()
@@ -195,7 +197,7 @@ def test_search_gate_tolerates_a_window_built_without_init(warned):
 def _comp_window():
     w = _bare_window()
     w.comp_text_area = QPlainTextEdit("some composition text")
-    w.pre_search_filters = {'criteria': dict(REGION)}
+    w.comp_pre_search_filters = {'criteria': dict(REGION)}
 
     class _Title:
         def text(self):
@@ -206,7 +208,7 @@ def _comp_window():
 
 def test_composition_does_not_run_while_its_filters_could_not_be_applied(warned):
     w = _comp_window()
-    w._pre_search_filter_error = 'query_failed'
+    scope_of(w, COMPOSITION).error = 'query_failed'
     try:
         w.run_composition()
     except _Stop:
@@ -224,7 +226,7 @@ def test_saved_filters_without_a_catalog_block_the_search(warned, tmp_path, monk
     worker = FilterCountWorker(dict(w.pre_search_filters))
     w._connect_filter_worker(worker, w._on_restore_filter_finished)
     worker.run()   # synchronously: emits failed('sidecar_unavailable')
-    assert w._pre_search_filter_error == 'sidecar_unavailable'
+    assert scope_of(w).error == 'sidecar_unavailable'
     try:
         w.start_search()
     except _Stop:
@@ -232,7 +234,7 @@ def test_saved_filters_without_a_catalog_block_the_search(warned, tmp_path, monk
     assert warned == [w._filter_unavailable_text('sidecar_unavailable')]
 
 
-# -- K-14: a search pressed while the lookup is still running waits for it --
+# -- K-14: a run pressed while its tab's lookup is still running waits for it --
 
 def test_search_waits_for_a_pending_filter_lookup_then_runs_on_its_answer(warned):
     w = _search_window(None)
@@ -242,28 +244,46 @@ def test_search_waits_for_a_pending_filter_lookup_then_runs_on_its_answer(warned
         w.start_search()
     except _Stop:
         pytest.fail("start_search ran on the old scope while the filter lookup was running")
-    assert w._rerun_search_after_filter is True
+    assert scope_of(w).rerun is True
     assert not warned
     ran = []
     w.start_search = lambda: ran.append(w.pre_search_restrict_sys_ids)
     worker.finished.emit({'990001'})
     assert ran == [{'990001'}], "the waiting search did not run on the lookup's answer"
-    assert w._filter_lookup_pending is False
+    assert scope_of(w).lookup_pending is False
+
+
+def _comp_lookup(w):
+    worker = _FakeWorker()
+    w._connect_filter_worker(
+        worker, lambda result: w._on_restore_filter_finished(result, COMPOSITION), COMPOSITION)
+    return worker
 
 
 def test_composition_waits_for_a_pending_filter_lookup_then_runs(warned):
     w = _comp_window()
-    worker = _FakeWorker()
-    w._connect_filter_worker(worker, w._on_restore_filter_finished)
+    worker = _comp_lookup(w)
     try:
         w.run_composition()
     except _Stop:
         pytest.fail("run_composition ran on the old scope while the filter lookup was running")
-    assert w._rerun_comp_after_filter is True
+    assert scope_of(w, COMPOSITION).rerun is True
     ran = []
-    w.run_composition = lambda **k: ran.append((k, w.pre_search_restrict_sys_ids))
+    w.run_composition = lambda **k: ran.append((k, w.comp_pre_search_restrict_sys_ids))
     worker.finished.emit({'990002'})
     assert ran == [({}, {'990002'})]
+
+
+def test_a_search_lookup_does_not_hold_the_composition(warned):
+    """GS-13: a lookup running for the Search tab's filters is not the Composition
+    tab's; with no filters of its own, Composition runs at once."""
+    w = _comp_window()
+    w.comp_pre_search_filters = {}
+    w.pre_search_filters = {'criteria': dict(REGION)}
+    w._connect_filter_worker(_FakeWorker(), w._on_restore_filter_finished)
+    with pytest.raises(_Stop):
+        w.run_composition()
+    assert scope_of(w, COMPOSITION).rerun is False
 
 
 def test_a_waiting_search_is_cancelled_with_a_message_when_the_lookup_fails(warned):
@@ -275,8 +295,8 @@ def test_a_waiting_search_is_cancelled_with_a_message_when_the_lookup_fails(warn
     except _Stop:
         pytest.fail("start_search ran while the filter lookup was running")
     worker.failed.emit('query_failed')
-    assert w._rerun_search_after_filter is False
-    assert w._pre_search_filter_error == 'query_failed'
+    assert scope_of(w).rerun is False
+    assert scope_of(w).error == 'query_failed'
     assert len(warned) == 1
     try:
         w.start_search()
@@ -303,13 +323,14 @@ def _history_entry():
                                    'text_all': ['word']}}
 
 
-@pytest.mark.parametrize("restore", ["_restore_regular_search_from_state",
-                                     "_restore_comp_search_from_state"])
-def test_removing_a_restored_chip_leaves_the_history_entry_alone(monkeypatch, tmp_path, restore):
+@pytest.mark.parametrize("restore, tab", [("_restore_regular_search_from_state", SEARCH),
+                                          ("_restore_comp_search_from_state", COMPOSITION)])
+def test_removing_a_restored_chip_leaves_the_history_entry_alone(monkeypatch, tmp_path, restore, tab):
     """Restore a history entry with domains=['Halakha', ...], then remove that
     chip: _remove_filter edits the live list IN PLACE, so a restore that
     shared the entry's lists rewrote the saved history (domains lost
-    'Halakha'). Drives the real restore and the real chip removal."""
+    'Halakha'). Drives the real restore and the real chip removal. Each
+    entry comes back to its own tab (GS-13), the other tab's filters untouched."""
     monkeypatch.setattr(fjms_service, "_default_service",
                         FjmsService(db_path=str(tmp_path / "absent.db")))
     monkeypatch.setattr(genizah_app, "FilterCountWorker", _IdleWorker)
@@ -321,45 +342,18 @@ def test_removing_a_restored_chip_leaves_the_history_entry_alone(monkeypatch, tm
     w._witness_edits_are_locked = lambda: False
     w._restore_comp_passage_preferences = lambda params: None
     w.composition_tab = None
+    other = COMPOSITION if tab == SEARCH else SEARCH
+    scope_of(w, other).filters = {'domains': ['Bible']}
     entry = _history_entry()
     getattr(w, restore)(entry['state'], entry)
-    assert w.pre_search_filters == entry['pre_search_filters'], "the restore lost a filter"
-    w._remove_filter(('domains', 'Halakha'))
-    w._remove_filter(('text_all', 'word'))
-    assert w.pre_search_filters == {'include_mode': True, 'domains': ['Piyyut']}
+    assert scope_of(w, tab).filters == entry['pre_search_filters'], "the restore lost a filter"
+    assert scope_of(w, other).filters == {'domains': ['Bible']}, "the restore replaced the other tab's filters"
+    w._remove_filter(('domains', 'Halakha'), tab)
+    w._remove_filter(('text_all', 'word'), tab)
+    assert scope_of(w, tab).filters == {'include_mode': True, 'domains': ['Piyyut']}
     assert entry == _history_entry(), (
         f"removing a chip changed the saved history entry: {entry['pre_search_filters']}")
 
-
-def test_dialog_ok_supersedes_a_pending_lookup(monkeypatch, warned):
-    """A scope the dialog computed replaces any lookup still running; the
-    late answer of the old one must not overwrite it."""
-    w = _bare_window()
-    w.pre_search_filters = {'criteria': dict(REGION)}
-    old = _FakeWorker()
-    w._connect_filter_worker(old, w._on_filter_recompute_finished)
-
-    class _Dialog:
-        def __init__(self, *a, **k):
-            pass
-
-        def exec(self):
-            return genizah_app.QDialog.DialogCode.Accepted
-
-        def get_filters(self):
-            return {'include_mode': True, 'criteria': {'style': {'values': ['Square'], 'mode': 'only'}}}
-
-        def get_restrict_sys_ids(self):
-            return {'990002'}
-
-    monkeypatch.setattr(genizah_app, 'PreSearchFilterDialog', _Dialog)
-    w._open_pre_search_filter_dialog()
-    assert w._filter_lookup_pending is False
-    old.finished.emit({'990777'})
-    assert w.pre_search_restrict_sys_ids == {'990002'}
-
-
-# -- GitHub review (Codex on #387, 2026-10-07): replacing the filters cancels a waiting run --
 
 class _AcceptedDialog:
     def __init__(self, *a, **k):
@@ -375,6 +369,37 @@ class _AcceptedDialog:
         return {'990002'}
 
 
+def test_dialog_ok_supersedes_a_pending_lookup(monkeypatch, warned):
+    """A scope the dialog computed replaces any lookup still running; the
+    late answer of the old one must not overwrite it."""
+    w = _bare_window()
+    w.pre_search_filters = {'criteria': dict(REGION)}
+    old = _FakeWorker()
+    w._connect_filter_worker(old, w._on_filter_recompute_finished)
+    monkeypatch.setattr(genizah_app, 'PreSearchFilterDialog', _AcceptedDialog)
+    w._open_pre_search_filter_dialog()
+    assert scope_of(w).lookup_pending is False
+    old.finished.emit({'990777'})
+    assert w.pre_search_restrict_sys_ids == {'990002'}
+
+
+@pytest.mark.parametrize("tab", [SEARCH, COMPOSITION])
+def test_each_tabs_focus_search_sets_its_own_scope_only(monkeypatch, warned, tab):
+    """GS-13: Focus Search on one tab leaves the other tab's filters and scope alone."""
+    w = _bare_window()
+    other = COMPOSITION if tab == SEARCH else SEARCH
+    scope_of(w, other).filters = {'domains': ['Bible']}
+    scope_of(w, other).restrict_sys_ids = {'990001'}
+    monkeypatch.setattr(genizah_app, 'PreSearchFilterDialog', _AcceptedDialog)
+    w._open_pre_search_filter_dialog(tab)
+    assert scope_of(w, tab).restrict_sys_ids == {'990002'}
+    assert scope_of(w, tab).filters == _AcceptedDialog().get_filters()
+    assert (scope_of(w, other).filters, scope_of(w, other).restrict_sys_ids) == (
+        {'domains': ['Bible']}, {'990001'})
+
+
+# -- GitHub review (Codex on #387, 2026-10-07): replacing the filters cancels a waiting run --
+
 def test_replacing_the_filters_cancels_a_waiting_search(monkeypatch, warned):
     """Search pressed while a lookup runs waits for it. When the filters are then
     replaced (dialog OK), the wait is cancelled and the status bar says so: left
@@ -387,10 +412,10 @@ def test_replacing_the_filters_cancels_a_waiting_search(monkeypatch, warned):
         w.start_search()
     except _Stop:
         pytest.fail("start_search ran on the old scope while the filter lookup was running")
-    assert w._rerun_search_after_filter is True
+    assert scope_of(w).rerun is True
     monkeypatch.setattr(genizah_app, 'PreSearchFilterDialog', _AcceptedDialog)
     w._open_pre_search_filter_dialog()
-    assert w._rerun_search_after_filter is False
+    assert scope_of(w).rerun is False
     assert w.statusBar().currentMessage() == 'Search cancelled'
     ran = []
     w.start_search = lambda: ran.append(w.pre_search_restrict_sys_ids)
@@ -403,67 +428,75 @@ def test_replacing_the_filters_cancels_a_waiting_search(monkeypatch, warned):
 
 def test_removing_the_last_filter_cancels_a_waiting_composition(warned):
     w = _comp_window()
-    w._connect_filter_worker(_FakeWorker(), w._on_filter_recompute_finished)
+    _comp_lookup(w)
     try:
         w.run_composition(custom_text='other text')
     except _Stop:
         pytest.fail("run_composition ran on the old scope while the filter lookup was running")
-    assert w._rerun_comp_after_filter is True
-    w._remove_filter(('criteria', 'region'))
-    assert w.pre_search_filters == {}
-    assert (w._rerun_comp_after_filter, w._rerun_comp_custom_text) == (False, None)
+    comp = scope_of(w, COMPOSITION)
+    assert (comp.rerun, comp.rerun_custom_text) == (True, 'other text')
+    w._remove_filter(('criteria', 'region'), COMPOSITION)
+    assert w.comp_pre_search_filters == {}
+    assert (comp.rerun, comp.rerun_custom_text) == (False, None)
     ran = []
     w.run_composition = lambda **k: ran.append(k)
-    w._run_deferred_after_filter()
+    w._run_deferred_after_filter(COMPOSITION)
     assert ran == []
 
 
-def test_search_and_composition_both_waiting_both_run(warned):
-    """GitHub review (Codex on #387, round 3): Search, then Composition, pressed
-    while one lookup runs: both wait. When it answers, both run, and neither stays
-    armed for a later, unrelated lookup."""
+def test_search_and_composition_each_wait_for_their_own_lookup(warned):
+    """GitHub review (Codex on #387, round 3), with one scope per tab (GS-13):
+    Search and Composition pressed while their lookups run both wait. Each runs
+    when ITS lookup answers, and neither stays armed for a later one."""
     w = _search_window(None)
     w.comp_text_area = QPlainTextEdit("some composition text")
+    w.comp_pre_search_filters = {'criteria': dict(REGION)}
 
     class _Title:
         def text(self):
             raise _Stop()
     w.comp_title_input = _Title()
-    worker = _FakeWorker()
-    w._connect_filter_worker(worker, w._on_filter_recompute_finished)
+    search_lookup = _FakeWorker()
+    w._connect_filter_worker(search_lookup, w._on_filter_recompute_finished)
+    comp_lookup = _comp_lookup(w)
     for start in (w.start_search, w.run_composition):
         try:
             start()
         except _Stop:
             pytest.fail("a run started on the old scope while the filter lookup was running")
-    assert (w._rerun_search_after_filter, w._rerun_comp_after_filter) == (True, True)
+    assert (scope_of(w, SEARCH).rerun, scope_of(w, COMPOSITION).rerun) == (True, True)
     ran = []
     w.start_search = lambda: ran.append('search')
     w.run_composition = lambda **k: ran.append('composition')
-    worker.finished.emit({'990001'})
+    search_lookup.finished.emit({'990001'})
+    assert ran == ['search'], "the Search tab's lookup started the composition"
+    comp_lookup.finished.emit({'990002'})
     assert ran == ['search', 'composition']
-    assert (w._rerun_search_after_filter, w._rerun_comp_after_filter) == (False, False)
+    assert (scope_of(w, SEARCH).rerun, scope_of(w, COMPOSITION).rerun) == (False, False)
     later = _FakeWorker()
     w._connect_filter_worker(later, w._on_filter_recompute_finished)
-    later.finished.emit({'990002'})
+    later.finished.emit({'990003'})
     assert ran == ['search', 'composition'], 'nothing starts at a later lookup'
 
 
-@pytest.mark.parametrize('reset', ['_reset_search', '_reset_composition'])
-def test_new_cancels_a_run_waiting_for_the_filters(reset):
-    """GitHub review (Codex on #387, round 4): New cleared the filters and made a
-    running lookup stale, but left a waiting search or composition armed; it then
-    started when a later lookup (a restored history entry's) answered."""
+@pytest.mark.parametrize('reset, tab', [('_reset_search', SEARCH), ('_reset_composition', COMPOSITION)])
+def test_new_clears_its_own_tabs_filters_and_waiting_run_only(reset, tab):
+    """GitHub review (Codex on #387, round 4): New made a running lookup stale but
+    left a waiting run armed. GS-13: New on one tab clears that tab's Focus Search
+    only; the other tab's filters, scope and waiting run stay."""
     from unittest.mock import MagicMock
     w = MagicMock()
-    w._filter_lookup_gen = 3
-    w._rerun_search_after_filter = True
-    w._rerun_comp_after_filter = True
-    w._rerun_comp_custom_text = 'other text'
+    other = COMPOSITION if tab == SEARCH else SEARCH
+    for t in (SEARCH, COMPOSITION):
+        scope = scope_of(w, t)
+        scope.filters, scope.restrict_sys_ids = {'domains': ['Bible']}, {'990001'}
+        scope.lookup_gen, scope.rerun, scope.rerun_custom_text = 3, True, 'other text'
     w._refuse_stop_during_passage_scan.return_value = False   # no scan to protect
     w._passage_batch_in_flight.return_value = False
     w.search_thread = w.comp_thread = w.group_thread = None   # nothing running
     getattr(GenizahGUI, reset)(w)
-    assert w._filter_lookup_gen == 4 and w.pre_search_filters == {}
-    assert (w._rerun_search_after_filter, w._rerun_comp_after_filter, w._rerun_comp_custom_text) == (
-        False, False, None)
+    cleared, kept = scope_of(w, tab), scope_of(w, other)
+    assert (cleared.filters, cleared.restrict_sys_ids, cleared.lookup_gen) == ({}, None, 4)
+    assert (cleared.rerun, cleared.rerun_custom_text) == (False, None)
+    assert (kept.filters, kept.restrict_sys_ids, kept.lookup_gen, kept.rerun) == (
+        {'domains': ['Bible']}, {'990001'}, 3, True), "New on one tab cleared the other's Focus Search"

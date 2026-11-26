@@ -31,8 +31,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # (file, top-level class or function, or None for the whole file) -> ceiling in lines
 CEILINGS = {
-    ("genizah_app.py", None): 39701,
-    ("genizah_app.py", "GenizahGUI"): 37591,
+    ("genizah_app.py", None): 39660,
+    ("genizah_app.py", "GenizahGUI"): 37549,
     ("web/pages/search.py", "create_search_page"): 7248,
     ("web/pages/parallels.py", "create_parallels_page"): 6505,
     ("web/pages/browse.py", "create_browse_page"): 5663,

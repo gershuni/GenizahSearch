@@ -1218,6 +1218,60 @@ def test_the_catalog_and_post_search_criteria_survive_a_restart(window, restore,
     assert timers, "the restored Catalog tab lists again"
 
 
+BIBLE = {"include_mode": True, "domains": ["Bible"]}
+PIYYUT = {"include_mode": True, "domains": ["Piyyut"]}
+
+
+def test_each_tabs_focus_search_survives_a_restart(window, restore, monkeypatch):
+    """GS-13: the Search and Composition tabs save their own Focus Search, and each
+    comes back to its own tab with its own lookup. The real _save_session, then the
+    real _restore_session."""
+    from desktop.search_scope import COMPOSITION, SEARCH, scope_of
+    saved = []
+    monkeypatch.setattr(session_persistence, "save_session_state", saved.append)
+    monkeypatch.setattr(app, "load_app_config", lambda: {"restore_mode": "always"})
+    monkeypatch.setattr(app.QTimer, "singleShot", staticmethod(lambda *a: None))
+    monkeypatch.setattr(app, "FilterCountWorker", _IdleFilterWorker)
+    w = window
+    w.pre_search_filters, w.comp_pre_search_filters = dict(BIBLE), dict(PIYYUT)
+    GenizahGUI._save_session(w)
+    assert (saved[-1]["pre_search_filters"], saved[-1]["comp_pre_search_filters"]) == (BIBLE, PIYYUT)
+    # A session with a search to restore (this window's own saves none), carrying what was saved.
+    state = _session_state(results=[_res(A, 1)])
+    state["pre_search_filters"] = saved[-1]["pre_search_filters"]
+    state["comp_pre_search_filters"] = saved[-1]["comp_pre_search_filters"]
+    w.pre_search_filters, w.comp_pre_search_filters = {}, {}
+    restore(state, "always")
+    assert (w.pre_search_filters, w.comp_pre_search_filters) == (BIBLE, PIYYUT)
+    assert scope_of(w, SEARCH).lookup_pending and scope_of(w, COMPOSITION).lookup_pending, (
+        "each tab recomputes its own scope")
+    assert scope_of(w, SEARCH).worker is not scope_of(w, COMPOSITION).worker
+
+
+def test_old_bounds_in_the_composition_filters_keep_the_search_rows(restore, monkeypatch):
+    """GS-13 (Codex on #144): with a scope per tab, the old measurement bounds in
+    the Composition tab's saved filters discard only its rows: the Search tab's,
+    found under its own filters, are shown."""
+    monkeypatch.setattr(app, "FilterCountWorker", _IdleFilterWorker)
+    state = _session_state(results=[_res(A, 1)])
+    state["pre_search_filters"] = dict(BIBLE)
+    state["comp_pre_search_filters"] = {"include_mode": True, "width_min": 10.0}
+    w = restore(state, "always")
+    assert w.results_table.rowCount() == 1, "the Search rows went with the Composition tab's old bounds"
+    assert w.comp_pre_search_filters == {"include_mode": True}
+
+
+def test_a_session_saved_before_the_split_gives_its_filters_to_search(restore, monkeypatch):
+    """GS-13: a session file with the one shared Focus Search (no Composition key)
+    restores it to the Search tab; Composition starts with none."""
+    monkeypatch.setattr(app, "FilterCountWorker", _IdleFilterWorker)
+    state = _session_state(results=[_res(A, 1)])
+    state["pre_search_filters"] = dict(BIBLE)
+    w = restore(state, "always")
+    assert w.pre_search_filters == BIBLE
+    assert w.comp_pre_search_filters == {}
+
+
 def test_the_restore_notices_outlive_session_restored(restore, monkeypatch):
     """Codex, PR 1c round 1: "Session restored" replaced every notice of the
     restore -- saved criteria the file cannot answer (pre-search, Catalog tab,

@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,  # 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from criteria_sidecar import A, B, C, D, E, F, UNIVERSE, build_criteria_sidecar  # noqa: E402
 
+from desktop.search_scope import scope_of  # noqa: E402
 import genizah_app  # noqa: E402
 import genizah_core  # noqa: E402
 import desktop.dialogs_filter as dialogs_filter  # noqa: E402
@@ -501,7 +502,7 @@ def test_main_window_chips_and_their_removal(svc, monkeypatch):
     assert texts == ["Region: all except Oriental  ×", "Lines: 20–25  ×"], texts
     w._remove_filter(('criteria', 'region'))
     assert w.pre_search_filters == {'include_mode': True, 'criteria': LINES}
-    assert w._filter_lookup_pending, "the scope is recomputed for what is left"
+    assert scope_of(w).lookup_pending, "the scope is recomputed for what is left"
     w._remove_filter(('criteria', 'lines'))
     assert w.pre_search_filters == {}, "the last criterion gone, no filter is left"
 
@@ -544,6 +545,7 @@ def test_the_start_up_warm_up_draws_the_chips_again_in_hebrew(svc, monkeypatch):
         setattr(w, f'{prefix}filter_chip_bar_layout', QHBoxLayout(bar))
         setattr(w, f'{prefix}filter_chip_count_label', QLabel())
     w.pre_search_filters = {'include_mode': True, 'criteria': EXCEPT_ORIENTAL}
+    w.comp_pre_search_filters = {'include_mode': True, 'criteria': EXCEPT_ORIENTAL}   # each tab its own (GS-13)
     w._update_filter_chip_bar()
     w._catalog_update_chips()
     layouts = (w.filter_chip_bar_layout, w.comp_filter_chip_bar_layout, w._catalog_chips_layout)
@@ -625,7 +627,9 @@ def test_a_history_entry_with_the_old_bounds_reruns_instead_of_showing_its_snaps
              'filtered_results': [{'display': {'id': A}}]}
     getattr(w, restore)(state, entry)
     assert shown == [], "a snapshot found under the old measurement bounds was shown"
-    assert w.pre_search_filters == {'include_mode': True, 'domains': ['Bible']}
+    # Each entry back to its own tab (GS-13).
+    restored = w.pre_search_filters if restore == "_restore_regular_search_from_state" else w.comp_pre_search_filters
+    assert restored == {'include_mode': True, 'domains': ['Bible']}
 
 
 # -- post-search filters (D20) -----------------------------------------------------

@@ -367,7 +367,7 @@ class _Win:
 
     def __init__(self, conditions):
         self.comp_conditions = list(conditions)
-        self.pre_search_restrict_sys_ids = None
+        self.comp_pre_search_restrict_sys_ids = None
 
     def _get_filter_text(self):
         return ''

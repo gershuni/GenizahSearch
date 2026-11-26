@@ -1444,7 +1444,7 @@ def test_history_names_the_witness_count_in_the_entry(monkeypatch):
     w.comp_raw_items = []
     w.comp_raw_filtered = []
     w._comp_last_result_witnesses = [{'id': 'w1'}, {'id': 'w2'}]
-    w.pre_search_filters = {}
+    w.comp_pre_search_filters = {}
     # UI refresh is not what this test is about.
     w._refresh_comp_history = lambda: None
     w.excluded_raw_entries = []
@@ -1783,7 +1783,7 @@ def _keyed(w, gen=1, filt='', thresh=5, restrict=None, monkeypatch=None):
     """`w` wired up enough to build a cache key, at a pinned generation."""
     w.spin_filter = _Spin(thresh)
     w._get_filter_text = lambda: filt
-    w.pre_search_restrict_sys_ids = restrict
+    w.comp_pre_search_restrict_sys_ids = restrict
     if monkeypatch is not None:
         monkeypatch.setattr(pl, 'current_state_generation', lambda *_slot: gen)
     return w
@@ -1838,7 +1838,7 @@ def test_a_restriction_list_keys_by_content_not_by_order(monkeypatch):
     away a whole roster's worth of results for nothing."""
     w = _keyed(_win(), restrict=['990002', '990001'], monkeypatch=monkeypatch)
     a = _key(w)
-    w.pre_search_restrict_sys_ids = ['990001', '990002']
+    w.comp_pre_search_restrict_sys_ids = ['990001', '990002']
     assert _key(w) == a
 
 
