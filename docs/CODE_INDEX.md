@@ -4354,6 +4354,13 @@ What Blau's and Friedman's tabs draw alike for a root's verb stems (2026-11-11).
 - **Function** `found_for_result` / `found_for_browse` — the panel's records for a result row (the search it carries) or for Browse's `cq` / `cnear` / `ctr` address, where `catalog_available()`
 - **Function** `browse_params` — the Browse address part that carries a catalogue result's search (search_results.py `_browse_match_params`)
 
+## web/components/results_trail.py
+
+- Browse opened from a search result: the thin bar to that search's other results (2026-11-26)
+- **Function** `keep_trail` / `get_trail` — a search's result list kept in memory for one browser (session code), bounded in number, size and age; the search page keeps it (`search_results.py::keep_results_trail`)
+- **Function** `trail_params` — the `trail=` / `r=` part each card's Browse link carries
+- **Function** `browse_results_bar` / `place_results_bar` — the bar: close, previous / next result, the count opening a scrolling list (`list_html`) with "Back to the search results"
+
 ## web/components/new_mark.py
 
 - **Function** `is_new` / `mark_used` — whether this reader has not used a feature yet, kept per reader (`ui.catalog_search_used`, `ui.title_fuzzy_used`; `/reset-hints` forgets them) (2026-11-18)

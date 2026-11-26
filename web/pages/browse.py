@@ -93,6 +93,7 @@ from web.components.joins_panel import peek_connected_fragments, load_connected_
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
 from web.components.shelfmark_tree_picker import open_shelf_picker
 from web.client_guard import client_gone
+from web.components.results_trail import browse_results_bar
 from web.components.shelf_pick import corpus_selection, is_placement_id, shelf_pick_button
 from web.reading_desk_handoff import take_reading_desk_handoff  # several from the header's or home's picker
 from web.shelfmark_tree_assets import shelf_tree_service
@@ -1043,8 +1044,12 @@ def _recents_lock_for(user_id: str) -> asyncio.Lock:
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False, open_computed: bool = False,
                        initial_version: Optional[str] = None, initial_span: Optional[str] = None,
                        initial_fp: Optional[str] = None, catalogue_search: Optional[dict] = None,
-                       initial_placement: Optional[str] = None, desk_from_shelf: bool = False):
+                       initial_placement: Optional[str] = None, desk_from_shelf: bool = False,
+                       results_trail: Optional[tuple] = None):
     """Create the professional manuscript viewer page UI.
+
+    results_trail (``trail=``, ``r=``): opened from a search result; the bar to that search's other
+    results (web/components/results_trail.py::browse_results_bar), its parameters kept in the address.
 
     desk_from_shelf (``desk=shelf``): several ticked in the header's or the home page's shelf picker
     with "Open more than one" (web/reading_desk_handoff.py). The list kept for this page, when it
@@ -1209,6 +1214,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     refs.page_client = ui.context.client
     _page_client = refs.page_client
     _url_state = {'highlight': highlight, 'last_sys_id': initial_sys_id}  # Track across navigations
+    trail_kept = {}  # the search results bar's address parameters (web/components/results_trail.py)
     # The manuscript's place on the shelf (_load_shelf_place): {'sys_id', 'info'}, and 'want', the
     # (sys_id, placement id) the reader arrived by from the shelf, for a manuscript with two places.
     shelf_info: dict = {}
@@ -1313,6 +1319,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # manuscript's address leaves it out (Codex review of PR #51).
             from web.components.catalog_found import address_params
             params.update(address_params(catalogue_search))
+        params.update(trail_kept)  # the bar to the search's other results, while it is shown
         qs = urlencode(params)
         new_url = f'/browse?{qs}'
         shelfmark = page.shelfmark or state.sys_id
@@ -6534,6 +6541,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
         loading_row.set_visibility(False)
         refs.loading_row = loading_row
+
+        # Opened from a search result: the bar to that search's other results.
+        browse_results_bar(results_trail, kept=trail_kept, on_close=_update_browser_url)
 
         # Main content container
         content_container = ui.column().classes('w-full')

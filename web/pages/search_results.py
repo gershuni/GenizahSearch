@@ -26,6 +26,8 @@ from web.ux_timing import ux_done
 from web.feature_flags import WEB_PUZZLE_ENABLED, web_fgp_enabled
 from web.components.filter_panel import persist_value
 from web.components.bodleian_links import render_bodleian_links
+from web.components.results_trail import (MAX_ITEMS as TRAIL_MAX_ITEMS, SEARCH_PAGE_JS as TRAIL_SEARCH_PAGE_JS,
+                                         TrailItem, keep_trail, short_text, trail_params)
 from web.pages.browse_state import (page_has_reading_view, normalize_rotation, clamp_rotation,
                                     ROTATION_MIN, ROTATION_MAX)
 from web.pages.search_state import (
@@ -107,6 +109,80 @@ def _browse_match_params(result, snippet: str) -> str:
         return catalogue
     phrase = _snippet_match_phrase(snippet)
     return f'&highlight={quote(phrase)}' if phrase else ''
+
+
+def result_page_ids(result, meta_mgr) -> tuple:
+    """(fl_id, ie_id, p_num) of the page a result matched, each None when unknown: from its
+    raw_header, else its uid."""
+    fl_id = ie_id = p_num = None
+    if meta_mgr:
+        for id_src in (result.get('raw_header'), result.get('uid')):
+            if not id_src or (fl_id and ie_id and p_num):
+                continue
+            try:
+                parsed = meta_mgr.parse_full_id_components(id_src)
+            except Exception:
+                continue  # unparseable source; try the next one
+            fl_id = fl_id or parsed.get('fl_id')
+            ie_id = ie_id or parsed.get('ie_id')
+            p_num = p_num or parsed.get('p_num')
+    return fl_id, ie_id, p_num
+
+
+def result_browse_url(result, meta_mgr) -> str:
+    """A search result's Browse address ('' without a sys_id): the page that matched, what the
+    search matched (``_browse_match_params``), or the scholarly edition that leads the result.
+
+    Page identity for the browse deep-link. A bare /browse?sys_id= is NOT a harmless
+    degradation: browse then resolves the first p_num==1 page of the FIRST volume, which for a
+    multi-IE manuscript is a different folio than the one that matched. So derive each
+    component independently, and fall back from raw_header to uid -- the uid
+    ('IE..._P..._FL...') carries ie_id/p_num/fl_id on its own even when raw_header is missing,
+    empty, or unparseable."""
+    sys_id = (result.get('display') or {}).get('id')
+    if not sys_id:
+        return ''
+    fl_id, ie_id, p_num = result_page_ids(result, meta_mgr)
+    url = f'/browse?sys_id={sys_id}'
+    if fl_id:
+        url += f'&fl_id={fl_id}'
+    if ie_id:
+        url += f'&volume_ie={ie_id}'
+    if p_num:
+        url += f'&page={p_num}'
+    # SEED-033 Option A: carry the matched phrase so the browse page's version chooser can
+    # default to whichever source actually contains it.
+    snippet = result.get('snippet', '')
+    url += _browse_match_params(result, snippet)
+    if result.get('edition'):
+        # A scholarly transcription leads this result: open that edition, its match mapped
+        # from the search (editions plan section 3.4).
+        url = editions_browse_url(result, meta_mgr) or url
+    return url
+
+
+def keep_results_trail(search_state, results) -> None:
+    """Keep the list the page shows for the bar Browse shows to its other results
+    (web/components/results_trail.py): once for each list (a filter makes a new one), its code
+    on ``search_state`` for the cards' Browse links."""
+    if search_state.trail_results is results:
+        return
+    search_state.trail_results = results
+    search_state.trail_token, search_state.trail_size = None, 0
+    if not results:
+        return
+    from web.safe_storage import get_persisted_session_uuid
+    items = []
+    for res in results[:TRAIL_MAX_ITEMS]:
+        url = result_browse_url(res, state.meta_mgr)
+        if not url:
+            break  # the list stops at a result Browse cannot open: next / previous never skip one
+        items.append(TrailItem(url=url, shelfmark=(res.get('display') or {}).get('shelfmark', '') or '',
+                               text=short_text(res.get('snippet', ''))))
+    token = keep_trail(items, owner=get_persisted_session_uuid(),
+                       more=bool(search_state.result_count_capped) or len(items) < len(results))
+    if token:
+        search_state.trail_token, search_state.trail_size = token, len(items)
 
 
 def _snippet_match_phrase(snippet: str) -> str:
@@ -576,8 +652,11 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
     start = page_idx * refs.page_size
     end = min(start + refs.page_size, total)
     page_results = results[start:end]
+    # The bar Browse shows to this list's other results (web/components/results_trail.py).
+    keep_results_trail(search_state, results)
 
     with refs.results_container:
+        ui.run_javascript(TRAIL_SEARCH_PAGE_JS)
         # Pagination controls at top (always reserve space to prevent CLS)
         if total_pages > 1:
             with ui.row().classes('w-full justify-between items-center px-4 pt-2'):
@@ -1120,43 +1199,10 @@ def create_result_card(search_state, refs, index, result):
             with ui.row().classes('gap-1 result-actions'):
                 # Browse
                 if sys_id:
-                    # Page identity for the browse deep-link. A bare /browse?sys_id=
-                    # is NOT a harmless degradation: browse then resolves the first
-                    # p_num==1 page of the FIRST volume, which for a multi-IE
-                    # manuscript is a different folio than the one that matched.
-                    # So derive each component independently, and fall back from
-                    # raw_header to uid -- the uid ('IE..._P..._FL...') carries
-                    # ie_id/p_num/fl_id on its own even when raw_header is missing,
-                    # empty, or unparseable.
-                    _card_fl_id = None
-                    _card_ie_id = None
-                    _card_p_num = None
-                    if state.meta_mgr:
-                        for _id_src in (result.get('raw_header'), result.get('uid')):
-                            if not _id_src or (_card_fl_id and _card_ie_id and _card_p_num):
-                                continue
-                            try:
-                                _parsed = state.meta_mgr.parse_full_id_components(_id_src)
-                            except Exception:
-                                continue  # unparseable source; try the next one
-                            _card_fl_id = _card_fl_id or _parsed.get('fl_id')
-                            _card_ie_id = _card_ie_id or _parsed.get('ie_id')
-                            _card_p_num = _card_p_num or _parsed.get('p_num')
-                    _card_browse_url = f'/browse?sys_id={sys_id}'
-                    if _card_fl_id:
-                        _card_browse_url += f'&fl_id={_card_fl_id}'
-                    if _card_ie_id:
-                        _card_browse_url += f'&volume_ie={_card_ie_id}'
-                    if _card_p_num:
-                        _card_browse_url += f'&page={_card_p_num}'
-                    # SEED-033 Option A: carry the matched phrase so the browse
-                    # page's version chooser can default to whichever source
-                    # actually contains it.
-                    _card_browse_url += _browse_match_params(result, snippet)
-                    if result.get('edition'):
-                        # A scholarly transcription leads this result: open that edition,
-                        # its match mapped from the search (editions plan section 3.4).
-                        _card_browse_url = editions_browse_url(result, state.meta_mgr) or _card_browse_url
+                    _card_browse_url = result_browse_url(result, state.meta_mgr)
+                    # The bar to the search's other results on Browse (web/components/results_trail.py).
+                    if search_state.trail_token and index < search_state.trail_size:
+                        _card_browse_url += trail_params(search_state.trail_token, index)
                     with ui.link(target=_card_browse_url).classes('no-underline'):
                         ui.button(icon='menu_book').props(f'flat round dense size=sm color=green aria-label="{tr("Browse Full Manuscript")}"').tooltip(tr('Browse Full Manuscript'))
 
@@ -1283,6 +1329,7 @@ def create_result_card(search_state, refs, index, result):
             page_idx = _page_index(display.get('img'))
             # Add volume suffix for multi-IE manuscripts
             _thumb_suffix = ''
+            _card_ie_id = result_page_ids(result, state.meta_mgr)[1]
             if _card_ie_id:
                 from genizah_core import get_volumes_for_sys_id as _get_vols
                 _tvols = _get_vols(sys_id)

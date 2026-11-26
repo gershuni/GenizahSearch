@@ -67,6 +67,11 @@ class SearchUIState:
         # A pass of this search could not answer for some rows: the check never completes.
         self.scholarly_incomplete: bool = False
         self.displayed_results = []  # Currently rendered subset (may be filtered)
+        # The list kept for Browse's bar to the other results (web/components/results_trail.py):
+        # the rows it was kept for, its code, and how many of them it holds.
+        self.trail_results = None
+        self.trail_token = None
+        self.trail_size = 0
         self.builder_negated_words: list = []  # Words negated via Query Builder
         self.result_domains: dict = {}  # Domain classification map for result indicators
         self.all_result_domains: dict = {}  # sys_id -> list of domain names (deduped)

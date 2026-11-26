@@ -2996,7 +2996,8 @@ def parallels_page_route(text: str = None):
 @ui.page('/browse', title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search')
 def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None, embed: str = None, computed: str = None,
                       version: str = None, span: str = None, fp: str = None,
-                      cq: str = None, cnear: str = None, ctr: str = None, place: str = None, desk: str = None):
+                      cq: str = None, cnear: str = None, ctr: str = None, place: str = None, desk: str = None,
+                      trail: str = None, r: str = None):
     # R2-1 discovery-review iframe: ?embed=1 renders a bare viewer (no nav shell,
     # no snapshot write, no current_page write) so it can be framed inside the
     # standalone discovery-review deck without stomping normal browse state.
@@ -3125,7 +3126,9 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
                            initial_version=version, initial_span=span, initial_fp=fp,
                            catalogue_search=_catalogue_search, initial_placement=place,
                            # several from the header's or the home page's shelf picker (web/reading_desk_handoff.py)
-                           desk_from_shelf=(desk or '') == 'shelf' and not _embed)
+                           desk_from_shelf=(desk or '') == 'shelf' and not _embed,
+                           # opened from a search result: the bar to its other results (web/components/results_trail.py)
+                           results_trail=(trail, r) if trail and not _embed else None)
 
 @ui.page('/joins-lab', title='Joins Lab | Dicta Genizah Search')
 def joins_lab_page_route(

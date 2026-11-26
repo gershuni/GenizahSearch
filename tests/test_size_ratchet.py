@@ -35,7 +35,7 @@ CEILINGS = {
     ("genizah_app.py", "GenizahGUI"): 37573,
     ("web/pages/search.py", "create_search_page"): 7248,
     ("web/pages/parallels.py", "create_parallels_page"): 6505,
-    ("web/pages/browse.py", "create_browse_page"): 5655,
+    ("web/pages/browse.py", "create_browse_page"): 5663,
     ("web/pages/joins_lab.py", "create_joins_lab_page"): 4377,
     ("web/pages/puzzle.py", "create_puzzle_page"): 2681,
 }

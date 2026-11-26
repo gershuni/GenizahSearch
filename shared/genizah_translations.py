@@ -6934,6 +6934,12 @@ TRANSLATIONS.update({
     "Shown inside {place}": "מוצג בתוך {place}",
     "Part: {part}": "חלק: {part}",
 })
+# Browse opened from a search result: the bar to the search's other results (2026-11-26).
+TRANSLATIONS.update({
+    "Search results": "תוצאות החיפוש",
+    "Result {index} of {total}": "תוצאה {index} מתוך {total}",
+    "Back to the search results": "חזרה לתוצאות החיפוש",
+})
 # The shelf picker's limits when ticking (owner, 2026-11-21; shared/shelfmark_tree_limits.py).
 TRANSLATIONS.update({
     "Up to {n} manuscripts here": "עד {n} כתבי יד כאן",
