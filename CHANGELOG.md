@@ -8,6 +8,139 @@ which is not public.
 
 ---
 
+## [11.3.0] - 2026-11-26 — Security updates and fixes
+
+**Website release.** The desktop app gets these changes with its next installer.
+
+### New Features
+- **Next and previous search result in Browse** (website): a manuscript opened from a search result
+  shows a thin bar above it, with the previous and next result and "Search results · Result 7 of
+  143". The count opens a scrolling list of the results (shelfmark and the matched words), with a
+  link back to the search. ✕ closes the bar.
+
+### Improvements
+- **Security updates**: the libraries the site uses for images, web requests and documents are
+  updated to their current versions. The Fragment Puzzle accepts JPEG and PNG images only, up to 40
+  million pixels.
+
+### Bug Fixes
+- **PGP tag results**: the fragments of a joined document come together, each labelled with its
+  document and place ("PGP 7403 · 1/4"), instead of looking like duplicates. Each shows its own
+  document's Hebrew description.
+- **New Search** after a Title or Catalogue search no longer leaves those modes' switches showing.
+- **Library links** (Cambridge, Oxford, Manchester, Princeton) are recognised by the link's own
+  address, not by the library's name appearing anywhere in it.
+- **Usage statistics**: the site's anonymous usage statistics are recorded again after a page's
+  first seconds.
+
+### Internal
+- Release checks: the render-smoke lane runs on labelled PRs; no bytecode caches in the installer.
+  Security alerts are read at session start and before a release.
+
+### A library is recognised by the link's host name (web + desktop)
+
+- `shared/url_hosts.py::is_on_host`: whether a link is Cambridge's, Oxford's, Manchester's or
+  Princeton's is decided by its host name, no longer by the name appearing anywhere in the link.
+  Used by the desktop viewer and library button, `genizah_app.py`, `shared/metadata_manager.py`,
+  `shared/cudl_identity.py` and `web/pages/browse_enrichment.py`.
+- `tests/test_url_hosts.py` fails on any new text test of a library host outside `tests/`.
+
+### Security alerts are read at session start and before a release (ci)
+
+The public repository had collected 179 Dependabot and 72 code scanning alerts: they are raised there,
+and the work happens in the development repository, where no step looked at them.
+
+- `scripts/check_security_alerts.py`: reads the open Dependabot, code scanning and secret scanning
+  alerts and exits 1 while one needs a decision (high or critical and not fixed in this checkout; code
+  scanning outside `tests/`; any secret). 2 means not checked. It changes nothing on GitHub.
+- `scripts/init.ps1` runs it at session start; the release pre-flight runs it and stops on 1.
+- `.github/workflows/dependency-audit.yml`: `pip-audit` on a PR that changes a requirements file, and
+  every Monday in the public repository.
+
+### PGP tag results: the fragments of a join are labelled (web + desktop)
+
+A PGP tag search lists one row per fragment, so the fragments of one joined
+document all showed the same description or transcription and looked like
+duplicates. The rows of a document now come together, in fragment order, and each
+says which document and fragment it is ("PGP 7403 · 1/4"): a small label on the
+web card, at the start of the desktop row's text. Single-fragment documents are
+unchanged. `shared/document_service.py::get_fragments_by_tag` orders by document
+and fragment and adds `fragment_index` / `fragment_count`; `pgp_join_label` builds
+the label for both apps.
+
+The web tag results also look up the Hebrew description by the row's own PGP
+document, not by fragment: a fragment in two documents could show the other
+document's description.
+
+### New Search hides the Title / Catalog switches (web)
+
+After a Title or Catalog search, New Search put the mode back to Exact but left the
+"Fuzzy search" and "Automatic translations" switches showing under the Exact search: the
+mode was set in code, which fires no change event, so the mode's own controls did not
+follow it. New Search now runs the mode-change handler (`web/pages/search.py::_reset_search`),
+as does cancelling a refinement step that restores a Title or Catalog query. Regression test
+in `tests/render_smoke/test_new_marks_render_smoke.py`.
+
+### Browse: a bar to the other search results (web)
+
+A result opened in Browse from the search page left no way to the next result but going back to
+the search. Browse opened from a result now shows a thin bar above the manuscript: close,
+previous and next result, and "Search results · Result 7 of 143", which opens a scrolling list of
+the results (number, shelfmark and the matched words; the current one marked) with "Back to the
+search results" at its top.
+
+- `web/components/results_trail.py` (new): the lists, kept in memory for the browser that made
+  them (its session code), at most 2,000 results each, 200 lists, six hours; the bar and its list.
+  A restart, another browser or a link sent to someone shows no bar, and Browse opens as before.
+- `web/pages/search_results.py`: `render_results` keeps the list once for each list it shows
+  (`keep_results_trail`); each card's Browse link carries `trail=` and `r=`. The link's address is
+  built by `result_browse_url` / `result_page_ids` (moved out of the card, unchanged).
+- `web/pages/browse.py`, `web/main.py`: the `/browse` route takes `trail` and `r`; Browse keeps
+  them in its address while the bar is shown, and the close button takes both away.
+- A result opened from the bar replaces the page in the tab's history, so the browser's Back
+  returns to the search. "Back to the search results" opens the search page the result was clicked
+  on (its address, kept in the browser when the link is clicked), else `/search`.
+- `tests/test_size_ratchet.py`: the `create_browse_page` ceiling is raised by 8 lines for the wiring
+  (the parameter, its docstring, the call that places the bar and the address parameters).
+
+### Release checks: render-smoke on labelled PRs, no bytecode caches in the installer (ci)
+
+- **Render-smoke on a labelled PR.** A PR labelled `render-smoke` runs the NiceGUI render-smoke lane
+  on Linux in the development repository (`.github/workflows/dev-render-smoke.yml`), with the public
+  CI's own steps; before, they first ran after publishing. The release steps ask for it.
+- **The installer carries no `__pycache__`.** `GenizahSearchPro.spec` copied the `shared` folder with
+  the bytecode caches of the checkout it was built in, so two builds of one commit could
+  differ. The app does not need them: the modules' own `.py` files still ship.
+- Tests: `tests/test_ci_workflows.py` (both labelled lanes), `tests/test_local_pyinstaller_smoke.py`.
+
+### Analytics: events after a page's first seconds reach PostHog again (web)
+
+From v10.0.0 the website lost most of what a reader does after a page opens: clicks, page leaves,
+web vitals, opened results, dictionary lookups, later page turns and most of the session recordings.
+Page views, the API, MCP and the desktop app were not affected.
+
+- `web/static/js/posthog_scrub.js` (PostHog's `before_send`, which keeps sign-in tokens out of the
+  events) redacted each event in place. The session recorder's first `$snapshot` carries
+  `posthog.config` itself, so its `token`, PostHog's project key, became `[redacted]` and every later
+  event of the page was rejected. The scrub now returns a redacted copy and never writes to the event
+  it was given; tokens are redacted as before.
+- `tests/test_posthog_scrub.py`: the live config keeps its key, a frozen event is scrubbed and left
+  as it was, and dates and URL objects are sent as JSON writes them.
+- Web analytics from 2026-11-17 until this is deployed under-count these events; do not compare across
+  that gap.
+
+### Security updates of the pinned libraries, and stricter image opening (web + desktop)
+
+- `requirements.txt`, `requirements-lock.txt` and `requirements-atlas-bake.txt`: Pillow 13.0.0,
+  aiohttp 3.14.5 (with yarl 1.25.1), PyJWT 2.15.1, cryptography 50.0.2, certifi 2026.11.20, requests
+  2.34.2, urllib3 2.8.0, lxml 6.1.3 (`requirements.txt` now asks for 6.1.0 or later), Brotli 1.2.1,
+  h2 4.4.1, hpack 4.2.0, fsspec 2026.9.0, opentelemetry-api 1.45.2, pytest 9.2.0.
+- `shared/background_removal.py::open_jpeg_or_png`: the Fragment Puzzle opens images with the JPEG
+  and PNG decoders only. An image sent to `/api/puzzle_process` is also refused above 40 million
+  pixels, before it is decoded.
+- Pillow 13: `Image.fromarray` is called without its `mode` argument.
+- Desktop: the installer needs a build environment refreshed from `requirements-lock.txt`.
+
 ## [11.2.0] - 2026-11-25 — Quick look and faster search
 
 ### New Features

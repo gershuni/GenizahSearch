@@ -8,6 +8,51 @@ rules). Each release adds its entry here with its release texts.
 
 HISTORY = [
     {
+        "version": "11.3.0",
+        "date": "2026-11-26",
+        "apps": [
+            "web"
+        ],
+        "title": {
+            "en": "Security updates and fixes",
+            "he": "עדכוני אבטחה ותיקונים"
+        },
+        "items": [
+            {
+                "category": "feature",
+                "apps": [
+                    "web"
+                ],
+                "en": "A manuscript opened from a search result shows a bar to the other results: previous and next, and a list of all the results with their shelfmarks and the words found.",
+                "he": "כתב יד שנפתח מתוצאת חיפוש מציג פס אל שאר התוצאות: הקודמת והבאה, ורשימה של כל התוצאות עם מספרי המדף והמילים שנמצאו."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "The website's libraries are updated to their current secure versions.",
+                "he": "הספריות שהאתר משתמש בהן עודכנו לגרסאותיהן המאובטחות."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "In PGP tag results, the fragments of a joined document appear together, each labelled with its document and place.",
+                "he": "בתוצאות לפי תגית PGP, הקטעים של מסמך מצורף מופיעים יחד, וכל אחד מסומן במסמך ובמקומו בו."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "web"
+                ],
+                "en": "New Search after a Title or Catalogue search no longer leaves their switches showing.",
+                "he": "חיפוש חדש אחרי חיפוש בכותרת או בקטלוג כבר אינו משאיר את המתגים שלהם."
+            }
+        ]
+    },
+    {
         "version": "11.2.0",
         "date": "2026-11-25",
         "apps": [

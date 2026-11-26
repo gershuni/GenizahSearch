@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 11.2.0
+# Dicta Genizah Search Pro 11.3.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,20 +8,16 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 11.2.0?
+## What's New in Version 11.3.0?
 
-**Quick look and faster search**
+**Security updates and fixes**
 
-In Pick from the shelf, press Q on a shelfmark — or the full-screen button under its image — to see
-its image filling the window, and move with the arrows from shelfmark to shelfmark along the shelf
-without leaving it. The details beside the shelf now show the manuscript's other images, zoom and
-rotate, and choose all of a join's partners at once; the details can be hidden to give the
-thumbnails room, and the thumbnails have an Extra large size. The keyboard works the same way in
-both apps. Searches of the scholarly transcriptions together with the automatic ones — the
-website's default — and Responsa searches show their first results while they run, and the full
-list comes sooner. Also fixed: the National Library of Russia's images show in the desktop's Pick
-from the shelf, a microfilm's thumbnail is a page of the manuscript rather than its START frame, and
-the desktop Reading Desk of a PGP document shows that document's own edition, once.
+A manuscript opened in Browse from a search result now has a thin bar to the search's other results:
+previous and next, and a scrolling list of all of them with their shelfmarks and matched words. In PGP
+tag results, the fragments of a joined document come together, each labelled with its document and
+place. The libraries the website uses are updated to their current secure versions. Also fixed: New
+Search after a Title or Catalogue search clears those modes' switches, and library links are
+recognised by their own address.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md).
 
