@@ -20,6 +20,8 @@ from desktop.image_loader import ImageLoaderThread, is_on_disk, memory_image
 from desktop.widgets import LibraryLinkButton, map_matching_image_index
 from shared.codicological import bodleian_image_link_items, get_bodleian_links
 from shared.synthetic_sys_id import is_synthetic_sys_id
+from shared.url_hosts import (CAMBRIDGE_HOSTS, MANCHESTER_HOSTS, OXFORD_HOSTS, PRINCETON_HOSTS,
+                              is_on_host)
 
 logger = get_logger(__name__)
 
@@ -668,14 +670,14 @@ def detect_external_provider(meta):
     # Not the NLI catalogue's CUDL link (MARC 856): enrich_metadata folds it into
     # the record's one Cambridge decision, and sets external_provider when it holds.
     for img in meta.get('images_ext', []) or []:
-        img_url = (img.get('url', '').lower())
-        if "cudl.lib.cam.ac.uk" in img_url:
+        img_url = img.get('url', '')
+        if is_on_host(img_url, CAMBRIDGE_HOSTS):
             return "cambridge"
-        if "bodleian.ox.ac.uk" in img_url or "hebrew.bodleian" in img_url:
+        if is_on_host(img_url, OXFORD_HOSTS):
             return "oxford"
-        if "luna.manchester.ac.uk" in img_url:
+        if is_on_host(img_url, MANCHESTER_HOSTS):
             return "manchester"
-        if "iiif-cloud.princeton.edu" in img_url or "figgy.princeton.edu" in img_url:
+        if is_on_host(img_url, PRINCETON_HOSTS):
             return "jts"
 
     # Check for Oxford Part ID

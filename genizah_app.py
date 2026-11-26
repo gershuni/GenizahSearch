@@ -92,6 +92,7 @@ from shared.shelfmark_tree_view import (crumbs as shelf_crumbs, display_name as 
                                         place_of as shelf_place_of, placement_request_is_spent,
                                         position as shelf_position, step_from as shelf_step_from)
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+from shared.url_hosts import CAMBRIDGE_HOSTS, is_on_host
 from shared.quick_open import quick_open_target
 from shared.keyboard_layout import layout_suggestion
 from desktop.widgets.line_number_text_edit import (
@@ -9032,8 +9033,7 @@ class GenizahGUI(QMainWindow):
         if provider == 'cambridge':
             return True
         for img in display_meta.get('images_ext', []) or []:
-            iurl = (img.get('url', '') or '').lower()
-            if 'cudl.lib.cam.ac.uk' in iurl:
+            if is_on_host(img.get('url', ''), CAMBRIDGE_HOSTS):
                 return True
         return False
 

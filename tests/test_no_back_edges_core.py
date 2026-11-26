@@ -182,6 +182,7 @@ EXTRACTED_MODULES = [
     "shared/transcription_service.py",
     "shared/translation_qc.py",
     "shared/translation_service.py",
+    "shared/url_hosts.py",
     "shared/visual_similarity_service.py",
     # 2026-09-24: genizahsearch.com page links for the desktop.
     "shared/web_links.py",

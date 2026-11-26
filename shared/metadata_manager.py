@@ -38,6 +38,7 @@ from shared.codicological import CodicologicalManager, bodleian_cache_needs_refr
 from shared.browse_map_utils import normalize_shelfmark, natural_sort_key, _strip_library_prefix
 from shared.sys_id_patterns import ANY_SYS_ID_RE, CORPUS_SYS_ID_RE
 from shared.text_normalize import strip_search_diacritics
+from shared.url_hosts import CAMBRIDGE_HOSTS, is_on_host
 from shared import background_work
 
 # One spelling for the quote marks of a Hebrew abbreviation: gershayim and the curly
@@ -1630,7 +1631,7 @@ class MetadataManager:
                         if url:
                             result['online_link'] = {'url': url, 'label': label}
                             # Detect CUDL for External Viewer
-                            if "cudl.lib.cam.ac.uk" in url:
+                            if is_on_host(url, CAMBRIDGE_HOSTS):
                                 result['external_iiif_link'] = url
 
                     elif tag == '942': # Alt Shelfmark
@@ -1791,7 +1792,7 @@ class MetadataManager:
         # dropped first: a corrected or withdrawn link must not survive in the cache.
         prev_cambridge_label = (current_meta.get('cambridge_resolution') or {}).get('label')
         was_cambridge = (current_meta.get('external_provider') == 'cambridge'
-                         or 'cudl.lib.cam.ac.uk' in (current_meta.get('external_url') or '').lower())
+                         or is_on_host(current_meta.get('external_url'), CAMBRIDGE_HOSTS))
         if was_cambridge:
             for key in ('external_url', 'external_provider', 'cambridge_alignment',
                         'external_count_mismatch'):

@@ -9,6 +9,7 @@ from PyQt6.QtGui import QColor, QDesktopServices, QTextCursor, QTextCharFormat
 
 from genizah_core import tr
 from shared.codicological import get_bodleian_links
+from shared.url_hosts import CAMBRIDGE_HOSTS, is_on_host
 
 
 class LibraryLinkButton(QToolButton):
@@ -48,7 +49,7 @@ class LibraryLinkButton(QToolButton):
         else:
             self.setMenu(None)
             self.setPopupMode(QToolButton.ToolButtonPopupMode.DelayedPopup)
-            if 'cudl.lib.cam.ac.uk' in self._item_url.lower():
+            if is_on_host(self._item_url, CAMBRIDGE_HOSTS):
                 provider = 'cambridge'
             label = {
                 'cambridge': 'Cambridge', 'oxford': 'Oxford', 'katz': 'Katz Center',

@@ -34,6 +34,7 @@ from web.pages.browse_editions import claim_target, keep_target, resolve_target,
 from web.page_count import apply_page_count, count_pages
 from web.safe_storage import safe_user_get, safe_user_set
 from shared.synthetic_sys_id import is_synthetic_sys_id
+from shared.url_hosts import CAMBRIDGE_HOSTS, is_on_host
 
 #: Per-user: has this reader OPENED the connections panel at least once? Drives
 #: the launch highlight on its toolbar entry control, and nothing else. Read and
@@ -490,7 +491,7 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 elif not _is_oxford and not result.get('external_url'):
                     # Other providers' links (JTS / Manchester) resolved by enrich_metadata.
                     cached_url = _ext.get('external_url') or ''
-                    if cached_url and 'cudl.lib.cam.ac.uk' not in cached_url.lower():
+                    if cached_url and not is_on_host(cached_url, CAMBRIDGE_HOSTS):
                         result['external_url'] = cached_url
                 if _library_code != 'Katz' and crossref_svc is not None and crossref_svc.is_available():
                     try:

@@ -32,6 +32,8 @@ from __future__ import annotations
 import re
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
+from shared.url_hosts import CAMBRIDGE_HOSTS, is_on_host
+
 #: Bump when the same data can resolve differently. Cached resolutions with another
 #: revision are recomputed; image caches keyed on it are bypassed.
 RESOLVER_REVISION = 1
@@ -200,7 +202,7 @@ def guess_label(name: str, library_code: Optional[str] = None) -> Optional[str]:
 
 def label_from_url(url: str) -> Optional[str]:
     """``https://cudl.lib.cam.ac.uk/view/MS-TS-00001-00001/2`` -> ``MS-TS-00001-00001``."""
-    if not url or 'cudl.lib.cam.ac.uk' not in url.lower():
+    if not is_on_host(url, CAMBRIDGE_HOSTS):
         return None
     m = _CUDL_LABEL_IN_URL.search(url.strip())
     return m.group(1).upper() if m else None
