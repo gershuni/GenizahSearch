@@ -2074,6 +2074,9 @@ class GenizahGUI(QMainWindow):
         self._pgp_pages_by_sys_id = {}
         self._pgp_badge_worker = None
         self._printed_badge_worker = None
+        # Advanced whenever the table's result set is replaced; badge replies for an older
+        # one are dropped (GS-11). Not _search_new_generation: a tag search must not drop a running text search.
+        self._results_table_generation = 0
         self._printed_sys_ids = set()
         self._printed_filter_state = 'all'  # 'all', 'hide_printed', 'only_printed'
         # Phase 95 REQ-6 D-10 D-39 — three-state LOCAL filter state (per-surface)
@@ -24597,7 +24600,7 @@ class GenizahGUI(QMainWindow):
         carries the value its run started under. Stop does not advance it.
         """
         if generation != getattr(self, attr, 0):
-            logger.info("dropped a signal from a run that New discarded")
+            logger.info("dropped a signal from a run that is no longer current (%s)", attr)
             return
         slot(*args)
 
@@ -24797,6 +24800,7 @@ class GenizahGUI(QMainWindow):
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
 
+        self._results_table_generation = getattr(self, '_results_table_generation', 0) + 1
         self.results_table.setRowCount(0)
         # The previous run's results go with its rows. Kept, they outlived
         # the table on the exits that deliver nothing (an error, a stop
@@ -25229,6 +25233,7 @@ class GenizahGUI(QMainWindow):
         self._preview_thread = None
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
+        self._results_table_generation = getattr(self, '_results_table_generation', 0) + 1
         self.results_table.setRowCount(0)
         self.results_table.setSortingEnabled(True)   # the preview turned it off
         self.result_row_by_sys_id = {}
@@ -25279,6 +25284,7 @@ class GenizahGUI(QMainWindow):
         # 5. Clear results table and related state
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
+        self._results_table_generation = getattr(self, '_results_table_generation', 0) + 1
         self.results_table.setRowCount(0)
         self.result_row_by_sys_id = {}
         self.last_results = []
@@ -25917,6 +25923,7 @@ class GenizahGUI(QMainWindow):
         # Post-search timing (search-speed handoff): where the time goes between
         # execute_search returning and the table showing results.
         _pt = [('start', time.perf_counter())]
+        self._results_table_generation = getattr(self, '_results_table_generation', 0) + 1
         # Show processing phase — keep progress bar visible with elapsed timer running
         self.search_progress.setRange(0, 0)  # Indeterminate
         # Monotonic and pause-discounted: see effective_elapsed().
@@ -26765,8 +26772,14 @@ class GenizahGUI(QMainWindow):
             self._update_search_within_btn()
 
     def _launch_enrichment_workers(self, results, defer=False):
-        """Launch domain, PGP badge, printed badge, and measurement enrichment workers."""
+        """Launch domain, PGP badge, printed badge, and measurement enrichment workers,
+        bound to the table's result set NOW, before any deferral (GS-11)."""
+        generation = getattr(self, '_results_table_generation', 0)
+        _for_this_table = partial(self._discardable, '_results_table_generation')
+
         def _start():
+            if generation != getattr(self, '_results_table_generation', 0):
+                return
             from desktop.gui_threads import DomainEnrichmentWorker
             from shared.local_sys_id import is_local_sys_id as _is_local
             # v7.16 BUG-6: Genizah enrichment (domain / PGP / printed / measurement)
@@ -26786,19 +26799,19 @@ class GenizahGUI(QMainWindow):
                 if self._domain_worker and self._domain_worker.isRunning():
                     self._domain_worker.wait()
                 self._domain_worker = DomainEnrichmentWorker(genizah_results)
-                self._domain_worker.finished.connect(self._on_domain_enrichment_loaded)
+                self._domain_worker.finished.connect(_for_this_table(self._on_domain_enrichment_loaded))
                 self._domain_worker.start()
 
                 if self._pgp_badge_worker and self._pgp_badge_worker.isRunning():
                     self._pgp_badge_worker.wait()
                 self._pgp_badge_worker = PGPBadgeWorker(sys_ids)
-                self._pgp_badge_worker.finished.connect(self._on_pgp_badges_loaded)
+                self._pgp_badge_worker.finished.connect(_for_this_table(self._on_pgp_badges_loaded))
                 self._pgp_badge_worker.start()
 
                 if self._printed_badge_worker and self._printed_badge_worker.isRunning():
                     self._printed_badge_worker.wait()
                 self._printed_badge_worker = PrintedBadgeWorker(sys_ids)
-                self._printed_badge_worker.finished.connect(self._on_printed_badges_loaded)
+                self._printed_badge_worker.finished.connect(_for_this_table(self._on_printed_badges_loaded))
                 self._printed_badge_worker.start()
 
                 # Phase 54 / D20: which results the post-search criteria keep
@@ -27656,6 +27669,7 @@ class GenizahGUI(QMainWindow):
         # replaces.
         self._set_local_scope_strip_visible(False)
         self._forget_responsa_notes()
+        self._results_table_generation = getattr(self, '_results_table_generation', 0) + 1
         if not results:
             # Phase 114 USAGE-03: zero-result completed tag search (D-07).
             # `tag` is the search term — MUST NOT appear in props (D-04).

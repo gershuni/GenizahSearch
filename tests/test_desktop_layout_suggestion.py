@@ -207,6 +207,7 @@ class _ZeroResultHost:
         self._search_cutoff = None
         self._refine_mode = False
         self._restoring_session = False
+        self._results_table_generation = 0      # on_search_finished advances it (GS-11)
         self._pause_search = SimpleNamespace(elapsed=lambda now: 1.0, state='running')
         self.export_buttons = []
         self.offered = []
