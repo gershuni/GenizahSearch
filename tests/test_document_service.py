@@ -492,6 +492,22 @@ class TestTagSearch:
         assert pgp_join_label(single[0]) == ''
         assert pgp_join_label({}) == ''
 
+    def test_pgp_join_snippet_leads_a_joins_row_with_its_label(self, pgp_service):
+        """The desktop row's text: the label first for a join's fragment, unchanged otherwise."""
+        from shared.document_service import pgp_join_snippet
+        joined = pgp_service.get_fragments_by_tag('letter')
+        assert pgp_join_snippet(joined[1], 'text') == '[PGP 1234 · 2/3] text'
+        assert pgp_join_snippet(pgp_service.get_fragments_by_tag('legal')[0], 'text') == 'text'
+
+    def test_both_apps_label_a_joins_tag_rows(self):
+        """The call sites: the desktop's tag rows and the web's tag result header use the label."""
+        import inspect
+        from web.pages import search, search_helpers
+        assert 'pgp_join_label(result)' in inspect.getsource(search_helpers.tag_result_shelfmark)
+        assert 'tag_result_shelfmark(result)' in inspect.getsource(search.create_search_page)
+        with open('genizah_app.py', encoding='utf-8') as fh:
+            assert "'snippet': pgp_join_snippet(r, snippet)" in fh.read()
+
     def test_get_fragments_by_tag_not_found(self, pgp_service):
         """Should return empty list for nonexistent tag."""
         results = pgp_service.get_fragments_by_tag('nonexistent_tag_xyz')

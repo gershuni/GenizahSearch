@@ -1487,6 +1487,13 @@ def pgp_join_label(row: Dict[str, Any]) -> str:
     return f"PGP {row['pgpid']} · {row.get('fragment_index', 0)}/{count}"
 
 
+def pgp_join_snippet(row: Dict[str, Any], snippet: str) -> str:
+    """The desktop tag-search row's text, led by ``[PGP 7403 · 1/4]`` when it is a
+    joined document's fragment (``pgp_join_label``); unchanged otherwise."""
+    label = pgp_join_label(row)
+    return f"[{label}] {snippet}" if label else snippet
+
+
 def get_all_distinct_tags() -> List[str]:
     """Get all distinct PGP tags across all documents, sorted alphabetically."""
     svc = get_pgp_service()

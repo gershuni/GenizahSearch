@@ -9,6 +9,18 @@ from __future__ import annotations
 from typing import Optional, List
 
 
+def tag_result_shelfmark(result) -> None:
+    """A PGP tag result's shelfmark and, for a joined document's fragment, which document and
+    fragment it is ("PGP 7403 · 1/4"): the rows of a join all show the document's text."""
+    from nicegui import ui
+    from shared.document_service import pgp_join_label
+    ui.label(result.get('shelfmark', 'Unknown')).classes('font-bold break-all').style('color: var(--primary-700);')
+    join_label = pgp_join_label(result)
+    if join_label:
+        ui.label(join_label).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+            'background: var(--bg-tertiary); color: var(--text-secondary); direction: ltr;')
+
+
 def selection_key(row) -> str:
     """A result's identity for the selection: its uid (one per page), else its manuscript.
 

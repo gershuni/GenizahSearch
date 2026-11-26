@@ -80,7 +80,7 @@ from web.document_service import (
     get_sys_ids_with_transcriptions, get_sys_ids_with_pgp_text,
     get_fragments_by_tag, get_all_distinct_tags,
 )
-from shared.document_service import pgp_join_label
+from web.pages.search_helpers import tag_result_shelfmark
 from web.search_load_control import enrichment_batch_slot
 from web.research_jobs import (ResearchJobError, consume_editions_skipped, consume_time_limit_stop,
                                 run_research_call, shared_time_limit, with_request_settings)
@@ -3500,10 +3500,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Reset all search state, clear results, filters, exclusions, and persistent storage."""
         # Clear query input
         query_input.value = ''
-        # Reset mode to exact; a value set in code fires no change event, so the mode's own
-        # controls (the Title / Catalog switches, Responsa options, ...) follow it by hand.
         mode_select.value = 'exact'
-        on_mode_change()
+        on_mode_change()  # set in code: no change event, so the mode's own controls follow by hand
         # Clear results
         search_state.results = []
         search_state.responsa_warning = None
@@ -7178,9 +7176,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 try:
                     _tag_show = _safe_get('show_translations', False)
                     if _tag_show:
-                        # By the row's own PGP document: a fragment in two documents
-                        # would otherwise get whichever translation its sys_id hit first.
-                        _tag_pgpids = sorted({r.get('pgpid') for r in tag_results if r.get('pgpid')})
+                        _tag_pgpids = sorted({r.get('pgpid') for r in tag_results if r.get('pgpid')})  # each row's own document
                         if _tag_pgpids:
                             def _fetch_tag_trans():
                                 from shared.translation_service import TranslationService
@@ -7246,16 +7242,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                             ).style(
                                                 'color: var(--accent-amber, #b45309);'
                                             ).tooltip(tr('scholarly transcription/translation available'))
-                                        ui.label(result.get('shelfmark', 'Unknown')).classes(
-                                            'font-bold break-all'
-                                        ).style('color: var(--primary-700);')
-                                        # A joined document's fragments all show its text:
-                                        # say which document and which fragment this is.
-                                        _join_label = pgp_join_label(result)
-                                        if _join_label:
-                                            ui.label(_join_label).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
-                                                'background: var(--bg-tertiary); color: var(--text-secondary); direction: ltr;'
-                                            )
+                                        tag_result_shelfmark(result)
 
                                     # Document type (with translation if available)
                                     _tag_r_trans = _tag_trans.get(result.get('pgpid'), {}) if _tag_trans else {}
