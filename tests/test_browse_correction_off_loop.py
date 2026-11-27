@@ -31,6 +31,7 @@ import gc
 import itertools
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from nicegui import core, ui
@@ -72,7 +73,7 @@ def _handler(client, name):
 
 
 @pytest.fixture
-def editor(monkeypatch, supabase_offline):  # noqa: F811  (the imported fixture, requested by name)
+def editor(request, monkeypatch, supabase_offline):  # noqa: F811  (the imported fixture, requested by name)
     """A signed-in /browse page in edit mode; every correction write is recorded.
 
     ``answer`` is what the write returns (a dict, or None for no answer);
@@ -84,6 +85,16 @@ def editor(monkeypatch, supabase_offline):  # noqa: F811  (the imported fixture,
     # Destroy the pending page tasks earlier tests left on their closed loops
     # now, before this test opens a slot they could pop (module docstring).
     gc.collect()
+
+    # A worker pool of this test's own. NiceGUI's run.io_bound shares one pool sized by the
+    # machine's cores (8 threads on a 4-core CI runner), and every page load here sends its
+    # comment and correction reads to the refused port of `supabase_offline`, which on Windows
+    # holds a thread for seconds: the held write then waited behind them past `_until_writing`'s
+    # 5 s ("the write never started", public CI on the v11.4.0 release commit, twice).
+    import nicegui.run as nicegui_run
+    pool = ThreadPoolExecutor(max_workers=64)
+    monkeypatch.setattr(nicegui_run, 'thread_pool', pool)
+    request.addfinalizer(lambda: pool.shutdown(wait=False, cancel_futures=True))
 
     from web.services import BrowsePage
     import web.auth_state as auth_state
