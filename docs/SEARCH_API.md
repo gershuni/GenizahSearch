@@ -1834,6 +1834,13 @@ HTTP clients without a ChatGPT account or API key. It is described in the
 `/api/openapi.json`. Requires deployment of the manuscript-details integration;
 older deployments may return 404. Do not substitute a guessed endpoint.
 
+**Limits.** 30 requests a minute and, since 2026-11-27, 2,000 requests per address in a trailing
+24 hours (`MANUSCRIPT_DETAILS_DAILY_LIMIT`). This daily budget is separate from the search,
+browse and parallels budget. It counts every details page, including later pages of one
+section and calls made through the MCP server's `get_manuscript_details`. Over it, the route
+answers 429 `daily_limit_reached` with `Retry-After`. Bulk downloading is not permitted; for
+full-corpus research access see the support page.
+
 ### Parameters and sections
 
 | Parameter | Meaning |

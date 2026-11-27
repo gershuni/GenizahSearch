@@ -292,18 +292,24 @@ class DailyBudget:
     minute).
     """
 
-    def __init__(self, default_limit: int = 2000):
+    def __init__(self, default_limit: int = 2000, env_var: str = 'SEARCH_API_DAILY_LIMIT',
+                 message: str = ('Daily request budget for this address reached; '
+                                 'see /api/capabilities limits.daily_requests_per_address')):
         # Bucket value: (deque[float], last_seen: float).
         self._buckets: dict[str, tuple[deque, float]] = {}
         self._lock = threading.Lock()
         self._default_limit = default_limit
+        # A second budget (manuscript details, 2026-11-27) has its own variable and message.
+        self._env_var = env_var
+        self._message = message
         self._last_sweep = 0.0
 
     def _current_limit(self) -> int:
-        """Re-read SEARCH_API_DAILY_LIMIT on every check (no restart to tune).
+        """Re-read the limit's variable (SEARCH_API_DAILY_LIMIT by default) on every check,
+        so no restart is needed to tune it.
         0 or negative disables the budget; an unparseable value keeps the default."""
         try:
-            v = int(os.environ.get('SEARCH_API_DAILY_LIMIT', str(self._default_limit)))
+            v = int(os.environ.get(self._env_var, str(self._default_limit)))
             return max(0, v)
         except ValueError:
             return self._default_limit
@@ -358,8 +364,7 @@ class DailyBudget:
                 retry_after = max(1, math.ceil(DAILY_BUDGET_WINDOW_SECONDS - (now - blocking)))
                 raise APIError(
                     'daily_limit_reached',
-                    'Daily request budget for this address reached; '
-                    'see /api/capabilities limits.daily_requests_per_address',
+                    self._message,
                     http_status=429,
                     headers={'Retry-After': str(retry_after)},
                 )

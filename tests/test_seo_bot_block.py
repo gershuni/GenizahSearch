@@ -21,10 +21,12 @@ from web.crawler_visibility import (
 SEMRUSH_UA = 'Mozilla/5.0 (compatible; SemrushBot/7~bl; +http://www.semrush.com/bot.html)'
 AHREFS_UA = 'Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)'
 MJ12_UA = 'Mozilla/5.0 (compatible; MJ12bot/v1.4.8; http://mj12bot.com/)'
+# As logged 2026-11-26 (owner decision D2: blocked like the SEO tools).
+SHAP_UA = 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ShapBot/0.1.0'
 
 
 class TestIsSeoToolCrawler:
-    @pytest.mark.parametrize('ua', [SEMRUSH_UA, AHREFS_UA, MJ12_UA])
+    @pytest.mark.parametrize('ua', [SEMRUSH_UA, AHREFS_UA, MJ12_UA, SHAP_UA])
     def test_matches_known_seo_bots(self, ua):
         assert is_seo_tool_crawler(ua) is True
 
@@ -53,6 +55,10 @@ class TestShouldBlockSeoToolRequest:
     @pytest.mark.parametrize('path', ['/', '/browse', '/browse?x=1', '/search', '/api/search'])
     def test_blocks_all_regular_paths(self, path):
         assert should_block_seo_tool_request(path, SEMRUSH_UA) is True
+
+    def test_blocks_shapbot_on_browse(self):
+        assert should_block_seo_tool_request('/browse?sys_id=990001520630205171', SHAP_UA) is True
+        assert should_block_seo_tool_request('/robots.txt', SHAP_UA) is False
 
     def test_robots_txt_stays_reachable(self):
         # RFC 9309: a 4xx robots.txt means "allow all" — crawlers must be

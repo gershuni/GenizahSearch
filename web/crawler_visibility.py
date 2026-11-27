@@ -24,6 +24,10 @@ SEO_TOOL_USER_AGENT_TOKENS = (
     'blexbot',
     'dataforseobot',
     'serpstatbot',
+    # Not an SEO tool, but blocked for the same reason (owner decision D2, 2026-11-27):
+    # 278,784 requests in 14 days to 2026-11-27, ~28,855 /browse page builds in one day,
+    # unknown operator, no visitors referred.
+    'shapbot',
 )
 
 # Canonical product tokens for robots.txt (case matters for readability;
@@ -39,6 +43,7 @@ SEO_TOOL_ROBOTS_AGENTS = (
     'BLEXBot',
     'DataForSeoBot',
     'serpstatbot',
+    'ShapBot',
 )
 
 # Internet Archive should preserve public pages, not implementation assets or

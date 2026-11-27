@@ -54,9 +54,31 @@ def load_web_section(sys_id, section):
     return load_section(sys_id, section)
 
 
-def register_manuscript_details(app, owner, loader=load_web_section, limiter=None):
+DETAILS_DAILY_LIMIT_ENV = 'MANUSCRIPT_DETAILS_DAILY_LIMIT'
+DETAILS_DAILY_LIMIT_DEFAULT = 2000
+DETAILS_DAILY_LIMIT_MESSAGE = (
+    'Daily manuscript-details budget for this address reached. Bulk downloading is not '
+    'permitted (https://genizahsearch.com/terms); for full-corpus research access, use '
+    'https://genizahsearch.com/support.')
+
+
+def make_details_daily_budget():
+    """Per-address trailing-24 h budget for this route only, apart from the search budget.
+
+    Owner decision D3 (2026-11-27): one client fetched 54,044 details in 14 days under the
+    30-a-minute limiter. MCP calls reach this same handler with the visitor's address
+    (web/mcp_server.py), so they count here too; MCP initialize and tools/list never reach it.
+    """
+    from web.api_hardening import DailyBudget
+    return DailyBudget(default_limit=DETAILS_DAILY_LIMIT_DEFAULT, env_var=DETAILS_DAILY_LIMIT_ENV,
+                       message=DETAILS_DAILY_LIMIT_MESSAGE)
+
+
+def register_manuscript_details(app, owner, loader=load_web_section, limiter=None, daily_budget=None):
     cache = OrderedDict()
     active = {}
+    if daily_budget is None:
+        daily_budget = make_details_daily_budget()
 
     def error(code, message, status, headers=None):
         return JSONResponse({'error': {'code': code, 'message': message}}, status_code=status,
@@ -84,6 +106,8 @@ def register_manuscript_details(app, owner, loader=load_web_section, limiter=Non
             limiter = RateLimiter(default_limit=30)
         try:
             limiter.check(caller)
+            # After the minute limiter: a request refused for its rate spends no daily budget.
+            daily_budget.check(caller)
         except APIError as exc:
             return error(exc.code, str(exc), exc.http_status, getattr(exc, 'headers', {}))
         query = request.query_params
