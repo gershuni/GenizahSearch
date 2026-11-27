@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-26 (archived GS-11, GS-13). 187 open: P1 0, P2 39, P3 148.
+> **Last Updated:** 2026-11-27 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-11-27-desktop-search-loaded-rows-leftovers.md). 189 open: P1 0, P2 38, P3 151.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -24,7 +24,7 @@ the private repository; grep only).
 |------|------|------|------|------|
 | Search | 0 | 4 | 22 | 26 |
 | Browse and viewer | 0 | 3 | 6 | 9 |
-| Desktop app | 0 | 7 | 31 | 38 |
+| Desktop app | 0 | 6 | 34 | 40 |
 | Website | 0 | 5 | 29 | 34 |
 | API and AI | 0 | 2 | 2 | 4 |
 | Discovery | 0 | 2 | 11 | 13 |
@@ -33,7 +33,7 @@ the private repository; grep only).
 | Build, CI and tests | 0 | 0 | 5 | 5 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 3 | 1 | 4 |
-| **Total** | **0** | **39** | **148** | **187** |
+| **Total** | **0** | **38** | **151** | **189** |
 
 ## P1 - Critical
 
@@ -62,7 +62,6 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
-| [GS-9](ISSUE_DETAILS.md#gs-9) | Desktop Search export, filters and counts see only the loaded rows | `genizah_app.py::export_results`, _collect_sorted_results, load_next_batch | 2026-09-25 | ❌ Open |
 | [GS-10](ISSUE_DETAILS.md#gs-10) | The `*` search-hit marker is in-band, so a literal asterisk in source text is still ambiguous | `desktop/widgets/__init__.py::mark_pattern_hits`, `desktop/result_dialog.py::_htmlify` | 2026-09-03 | ❌ Open |
 | [GS-12](ISSUE_DETAILS.md#gs-12) | Desktop Lab Mode composition silently ignores Focus Search | `genizah_app.py::run_composition` (Lab branch), `desktop/gui_threads.py::LabCompositionThread` | 2026-09-03 | ❌ Open |
 | [GS-14](ISSUE_DETAILS.md#gs-14) | Stop blocks the UI thread and can still hard-kill a worker (Search fixed; Composition and grouping remain) | `genizah_app.py::_reset_composition`, `closeEvent` | 2026-08-19 | ❌ Open |
@@ -169,6 +168,9 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-313](ISSUE_DETAILS.md#gs-313) | The result viewer's previous / next stops at the loaded rows | `genizah_app.py::show_full_text_for_result`, `_collect_sorted_results` | 2026-11-27 | ❌ Open |
+| [GS-314](ISSUE_DETAILS.md#gs-314) | A column sort orders only the loaded rows | `genizah_app.py` results table (`setSortingEnabled(True)`), `load_next_batch` | 2026-11-27 | ❌ Open |
+| [GS-315](ISSUE_DETAILS.md#gs-315) | Export says "Nothing to export" without saying why when only loading rows are ticked | `genizah_app.py::export_results`, `_results_to_export` | 2026-11-27 | ❌ Open |
 | [GS-309](ISSUE_DETAILS.md#gs-309) | A search that reuses a terminated worker's thread id can lose its user-work mark | `shared/background_work.py::user_work_started` | 2026-11-23 | ❌ Open |
 | [GS-304](ISSUE_DETAILS.md#gs-304) | A shelfmark opened in the first seconds after start can fail with "dictionary changed size during iteration" | `shared/metadata_manager.py::_iter_shelfmark_sources` (iterates `self.csv_bank` while the catalogue is still being loaded), reached from `MetadataManager.resolve_system_by_shelfmark` -> `_get_shelfmark_index` | 2026-11-20 | ❌ Open |
 | [GS-295](ISSUE_DETAILS.md#gs-295) | A saved Catalog search shows the Exact marker in the history menu | `genizah_app.py::GenizahGUI._MODE_CHARS`, `GenizahGUI._add_history_menu_item` | 2026-11-18 | ❌ Open |

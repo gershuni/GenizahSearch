@@ -113,7 +113,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "11.2.0"
+WHATS_NEW_CONTENT_VERSION = "11.4.0"
 
 
 class WhatsNewBar(QFrame):
@@ -210,7 +210,9 @@ class WhatsNewBar(QFrame):
         # texts, 2026-11-22).
         # v11.2.0: Quick look in Pick from the shelf (approved with the release texts,
         # 2026-11-25).
-        self.lbl_msg.setText(tr("New: Quick look in Pick from the shelf - press Q on a shelfmark to see its image filling the window, and move along the shelf with the arrows. Press Ctrl+W to try it!"))
+        # v11.4.0: the PGP refresh, the background export and the filters over every result
+        # (approved with the release texts, 2026-11-26).
+        self.lbl_msg.setText(tr("Version 11.4.0: PGP data updated, export in the background, and filters over all the results"))
         self.show()
 
     def on_learn_more(self):
@@ -368,10 +370,16 @@ class WhatsNewDialog(QDialog):
         # owner's own Hebrew): three bullets, Quick look with its keys, the Details tab with
         # the same keys, and faster search; the fixes are in the version history. 11.0.0's
         # stay in "All versions".
+        # v11.4.0 (2026-11-26, approved with the release texts): five bullets, the PGP refresh,
+        # filters and Export over every result, Stop / New / Close, Focus Search per tab, and
+        # the PGP join labels (released on the web in 11.3.0); the rest is in the version
+        # history. 11.2.0's stay in "All versions".
         items = [
-            tr("In Pick from the shelf, Quick look (Q, or the full-screen button under the image): a shelfmark's image filling the window. The arrows move from shelfmark to shelfmark along the shelf; Shift + the right / left arrow moves between the manuscript's images; + / - zoom in and out, R / Shift+R rotate; Space chooses, Enter opens, Esc goes back to the list."),
-            tr('In the Details tab of Pick from the shelf: the manuscript\'s other images, zoom and rotate, with the same keys (Shift + the right / left arrow, + / -, R / Shift+R), and one box to choose all of a join\'s partners. Hide the details to give the thumbnails room, and try the Extra large thumbnails.'),
-            tr("Faster search: in a search that includes the scholarly transcriptions and in Responsa-style search, the search runs faster and the first results appear as soon as they arrive."),
+            tr("Princeton Geniza Project data updated: 37,029 documents, 387 of them new, and 45 new joins."),
+            tr("The Search tab's filters, counts and Export cover all the results; a large export runs in the background."),
+            tr("Stop, New and Close no longer freeze the window."),
+            tr("The Search tab and the Composition Search tab each keep their own Focus Search."),
+            tr("In PGP tag results, a joined document's fragments appear together, each labelled with its document and place."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

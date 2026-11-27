@@ -8,6 +8,175 @@ which is not public.
 
 ---
 
+## [11.4.0] - 2026-11-27 — PGP data refresh and smoother desktop searching
+
+**Website and desktop release.** The desktop installer also brings the v11.3.0 changes to the
+desktop (PGP join labels, library links, library security updates).
+
+### New Features
+- **Export of a large Search result list runs in the background** (desktop): above 2,000 rows the
+  file is built while the window stays usable, with progress and Cancel. The saved message says
+  how many results were written.
+
+### Improvements
+- **Princeton Geniza Project data updated** (both): 37,029 documents (387 new), with the changes
+  upstream made to 2,787 others. Catalogue search covers them.
+- **Filters, counts and Export cover every result** (desktop): the Search tab loads results 500 at
+  a time; column filters, "Showing X of N", the excluded count, "Load more" and Export now read
+  the whole result list, not only the loaded rows. While the table is sorted, Export writes the
+  whole list in that order.
+- **Focus Search per tab** (desktop): the Search tab and the Composition tab each keep their own
+  Focus Search; New clears only its own tab's.
+- **Browse's results bar** (website): each row of the results list shows the beginning of the
+  title; the current row is readable in the dark theme, and opening the list keeps "Back to the
+  search results" in view.
+
+### Bug Fixes
+- **Stop, New and Close** (desktop) no longer freeze the window for seconds or kill a running
+  search: the search stops in the background, and what it found so far stays as partial results.
+- **PGP tag search** (desktop): a late reply from the previous text search no longer blanks the
+  PGP column and links.
+- **Row numbers** (desktop): with a filter on, the numbers down the side of the results count the
+  shown rows only.
+- **PGP refresh**: the update step now reports a failed update instead of going on with it.
+
+### Stop, New and Close no longer freeze the window or kill a search (desktop)
+GS-14. Stop waited up to five seconds on the window's own thread for the
+search to reach a point where it could stop (New three, Close two), then
+`QThread.terminate()`d it, which can kill a thread inside the index searcher
+or a database handle. Some steps of a search have no such point, so no wait
+was long enough and no terminate was safe.
+
+- `desktop/search_run.py` (new): Stop asks the search to stop and lets it
+  finish in the background; what it found so far still shows as partial
+  results. New, Close and a new search over a running one also stop listening
+  to it, so nothing it delivers later reaches the window. Nothing waits, and
+  nothing is terminated (owner ruling: "detach").
+- A stopped search is held until it ends; at exit `desktop/qthread_exit.py`
+  settles one still running. At most one stopped search may still be
+  finishing when a new one starts: a third waits, with "Still stopping the
+  previous search".
+- The index install also waits for a stopped search still finishing.
+- `_drain_previous_worker` now serves Composition only (its stop paths are
+  unchanged).
+- Tests: `tests/test_search_run.py`; `tests/test_pause_stop_lifecycle.py`
+  follows the search's stop paths into the new module and pins that nothing
+  in `genizah_app.py` waits on or terminates `search_thread`.
+
+### Browse's results list: the title's beginning, and the current row in the dark theme (web)
+- `web/components/results_trail.py`: each row of the bar's list shows the beginning of the result's
+  title (up to 40 characters, `short_title`) between the shelfmark and the matched words.
+- The current row was a light green under light text in the dark theme; there it takes the theme's
+  own selected-row colour (`--bg-active`), and in both themes it is marked by a bar at its start.
+- Opening the list scrolls only the list to the current result, so "Back to the search results"
+  stays in view; the list no longer overflows the menu sideways on a narrow window.
+
+### PGP data refreshed to upstream 8879d566 (web + desktop)
+The Princeton Geniza Project data is refreshed from `princetongenizalab/pgp-metadata` commit
+`8879d566` (2026-11-26), replacing `a94528cc` (2026-09-21). Upstream added 387 documents, 403
+fragments and 352 footnotes, withdrew 105 documents (kept, as upserts never delete), and changed
+2,787 documents. `pgp_data/pgp.db` now holds 37,029 documents, 10,632 sources, 24,094 footnotes and
+37,876 fragment links (sidecar schema unchanged, 1.1.0). Our machine Hebrew translations of PGP's descriptions stay withheld.
+
+- The catalogue text sidecar is rebuilt from it: 2,456,506 records (+471, all PGP).
+- `web/stats_service.py::CORPUS_STATS`: scholarly transcriptions 33,050 -> 33,129.
+- `scripts/import_pgp_sections.py --execute` exited 0 after a failed update, so the refresh went
+  on to export with that row stale. The server closes an HTTP/2 connection after 10,000 requests,
+  so the 10,000th update failed on every run. It now retries an update once and exits 1 if any
+  update still fails (`tests/test_import_pgp_sections_exit.py`).
+
+### Focus Search is its own on the Search tab and on the Composition tab (desktop)
+GS-13. The desktop Search tab and Composition tab shared one Focus Search:
+setting it on one tab restricted the other, a lookup running for one held the
+other's run, and New on either tab cleared both.
+
+- Each tab now has its own scope (`desktop/search_scope.py`): its filters, the
+  manuscripts they allow, and the lookup that computes them, with its own
+  error, its own waiting run (K-14) and its own generation.
+- Composition searches, their result cache key and the Conditions fingerprint
+  read the Composition scope; the Search tab, refinement and the visual
+  suggestions read the Search scope. The catalogue's "Search in results" and
+  "Parallels in results" each set the scope of the tab they open.
+- New clears only its own tab's Focus Search.
+- History: a composition entry saves and restores the Composition scope.
+- Session file: a new `comp_pre_search_filters` key beside
+  `pre_search_filters` (the Search tab's). A session saved before this has only
+  the shared key, which restores to the Search tab; Composition starts with none.
+- `GenizahGUI.pre_search_filters` / `pre_search_restrict_sys_ids` keep their
+  names (the Search tab's); `comp_pre_search_filters` /
+  `comp_pre_search_restrict_sys_ids` are the Composition tab's.
+- Tests: `tests/test_filter_unavailable_desktop_window.py` rewritten for one
+  scope per tab, with GS-13 cases; session save and restore in
+  `tests/test_exclusion_surfaces.py`.
+
+### Search filters, counts and Export cover every result, not only the loaded rows (desktop)
+GS-9, part 1 of 2. The Search tab loads its results 500 at a time, and the
+column filters, the exclusions' count, "Showing X of N", "Load more" and
+Export all read the rows loaded so far. A 1,200-result search not scrolled
+exported 500 rows; a filter whose only match was result 900 showed an empty
+table under "Load more results (700 not loaded)".
+
+- `desktop/result_view.py` (new): one verdict per result, over the whole
+  list, for every filter and exclusion. The batches draw only the results it
+  keeps, so a filter never leaves an empty table with results left.
+- "Showing X of N", "(N excluded)" and "Load more" count the whole list;
+  Export writes every kept result (or the ticked ones, as before).
+- A result whose shelfmark or title is not fetched yet passes a Shelfmark or
+  Title filter until it is, so its fetch starts and the fetched text decides.
+- A loosened filter that lets in results passed over before draws the table
+  again from the top; ticked results stay ticked.
+- Metadata arriving for many manuscripts runs one filter pass, not one per
+  manuscript; the title of each new row reads the translations setting once
+  per batch, not once per row. Turning translations on or off filters the
+  titles again.
+- "Only results with all terms" is one more rule of the view: "Load more"
+  now pages its matching results.
+- Tests: `tests/test_result_view.py`, `tests/test_result_view_window.py`;
+  `tests/test_exclusion_surfaces.py` follows the new rule that a result
+  excluded before its batch is drawn has no row.
+
+### A large Search export no longer freezes the window (desktop)
+GS-9, part 2 of 2. Part 1 made Export write every result the filters keep, not
+only the 500 loaded; an export of 28,000 results then froze the window for
+about a minute while each page's text was read from the index.
+
+- `desktop/search_export.py` (new): above 2,000 rows the file is built on a
+  worker, with a progress dialog and Cancel, and the window stays usable. The
+  export reads a snapshot taken when it starts, so a new search or New
+  meanwhile does not change the file; the index install waits for it. The
+  save, its locked-file question and the result message stay on the window.
+- The saved message says how many results were written.
+- While the results table is sorted by Shelfmark, System ID, Library, Title
+  or Domain, Export writes the whole list in that order, not the loaded rows
+  sorted and the rest after them.
+- The numbers down the side of the results table count the shown rows only:
+  with a filter on, Qt's own numbers counted the hidden rows too, so 143
+  matches ended at "638".
+- `export_results` is split: `_search_export_job` (the snapshot),
+  `genizah_app._build_search_export` (the bytes, for xlsx, csv, docx and txt)
+  and `_finish_search_export` (the save). `GenizahGUI` is about 300 lines
+  shorter.
+- Tests: `tests/test_search_export.py`.
+
+### A late PGP badge reply no longer blanks a PGP-tag search's column (desktop)
+GS-11. After a text search the desktop starts three workers that fill the PGP,
+scholarly-transcription, printed and domain information. Their replies went
+straight to the table, so a reply that arrived after a PGP-tag search had
+replaced the results overwrote the tag search's PGP set and blanked its PGP
+column and links.
+
+- The table now carries `_results_table_generation`, advanced whenever its
+  result set is replaced: a text search starting or finishing (and a restored
+  one), a PGP-tag search, an error, New.
+- `_launch_enrichment_workers` takes the generation when it is called, before
+  the 500 ms deferral of a session restore: a deferred start for a table that
+  was replaced starts nothing, and a reply for one is dropped.
+- It is kept apart from `_search_new_generation`, which a tag search must not
+  advance: a text search still running would lose its results and leave the
+  tab "searching".
+- First PR of the desktop search-run plan (private repository). Tests:
+  `tests/test_badge_replies_follow_the_table.py`.
+
 ## [11.3.0] - 2026-11-26 — Security updates and fixes
 
 **Website release.** The desktop app gets these changes with its next installer.

@@ -6556,6 +6556,22 @@ TRANSLATIONS.update({
     "Comfortable rows": "שורות מרווחות",
 })
 
+# v11.4.0 desktop What's New bar and dialog (2026-11-26), approved with the release texts.
+TRANSLATIONS.update({
+    "Version 11.4.0: PGP data updated, export in the background, and filters over all the results":
+        "גרסה 11.4.0: נתוני PGP מעודכנים, ייצוא ברקע וסינון על כל התוצאות",
+    "Princeton Geniza Project data updated: 37,029 documents, 387 of them new, and 45 new joins.":
+        "נתוני פרויקט הגניזה של פרינסטון עודכנו: 37,029 מסמכים, מהם 387 חדשים ו-45 צירופים חדשים.",
+    "The Search tab's filters, counts and Export cover all the results; a large export runs in the background.":
+        "הסינונים, הספירות והייצוא בלשונית החיפוש חלים על כל התוצאות; ייצוא גדול רץ ברקע.",
+    "Stop, New and Close no longer freeze the window.":
+        '"עצור", "חדש" וסגירת החלון כבר אינם מקפיאים אותו.',
+    "The Search tab and the Composition Search tab each keep their own Focus Search.":
+        'ללשונית החיפוש וללשונית חיפוש החיבורים יש כל אחת "מקד חיפוש" משלה.',
+    "In PGP tag results, a joined document's fragments appear together, each labelled with its document and place.":
+        "בתוצאות לפי תגית PGP, קטעי מסמך מצורף מופיעים יחד, וכל אחד מסומן במסמך ובמקומו בו.",
+})
+
 # v11.2.0 web What's New entry and desktop What's New bar and dialog (2026-11-25), approved
 # with the release texts (the web line's last sentence and the search bullet are the owner's
 # own Hebrew).

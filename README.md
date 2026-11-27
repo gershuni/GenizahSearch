@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 11.3.0
+# Dicta Genizah Search Pro 11.4.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,16 +8,16 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 11.3.0?
+## What's New in Version 11.4.0?
 
-**Security updates and fixes**
+**PGP data refresh and smoother desktop searching**
 
-A manuscript opened in Browse from a search result now has a thin bar to the search's other results:
-previous and next, and a scrolling list of all of them with their shelfmarks and matched words. In PGP
-tag results, the fragments of a joined document come together, each labelled with its document and
-place. The libraries the website uses are updated to their current secure versions. Also fixed: New
-Search after a Title or Catalogue search clears those modes' switches, and library links are
-recognised by their own address.
+The Princeton Geniza Project data is updated: 37,029 documents, 387 of them new, and catalogue
+search covers them. In the desktop app, the Search tab's filters, counts and Export now cover the
+whole result list, not only the rows loaded so far, and a large export runs in the background
+with progress and Cancel. Stop, New and Close no longer freeze the window, and the Search and
+Composition tabs each keep their own Focus Search. On the website, Browse's list of search
+results shows the beginning of each title and reads well in the dark theme.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md).
 
@@ -97,7 +97,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V11.2.0_Setup.exe`, about 667 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
+1. **Download:** the installer (`GenizahSearchPro_V11.4.0_Setup.exe`, about 667 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest).
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

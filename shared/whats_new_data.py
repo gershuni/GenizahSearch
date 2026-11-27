@@ -8,6 +8,93 @@ rules). Each release adds its entry here with its release texts.
 
 HISTORY = [
     {
+        "version": "11.4.0",
+        "date": "2026-11-27",
+        "apps": [
+            "web",
+            "desktop"
+        ],
+        "title": {
+            "en": "PGP data refresh and smoother desktop searching",
+            "he": "נתוני PGP מעודכנים וחיפוש חלק יותר בתוכנה"
+        },
+        "items": [
+            {
+                "category": "improvement",
+                "apps": [
+                    "web",
+                    "desktop"
+                ],
+                "en": "Princeton Geniza Project data updated: 37,029 documents, 387 of them new and 2,787 revised. 45 more documents are now joins (1,766 in all), 109 more have a transcription and 60 more a translation.",
+                "he": "נתוני פרויקט הגניזה של פרינסטון עודכנו: 37,029 מסמכים, מהם 387 חדשים ו-2,787 שעודכנו. 45 מסמכים נוספים הם עכשיו צירופים (1,766 בסך הכול), ל-109 מסמכים נוספים יש תעתיק ול-60 תרגום."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "The Search tab's filters, counts and Export cover all the results, not only the rows loaded so far.",
+                "he": "הסינונים, הספירות והייצוא בלשונית החיפוש חלים על כל התוצאות, לא רק על השורות שנטענו עד כה."
+            },
+            {
+                "category": "feature",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "A large export runs in the background, with progress and Cancel, and the window stays usable.",
+                "he": "ייצוא גדול רץ ברקע, עם התקדמות וכפתור ביטול, והחלון נשאר זמין."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "Stop, New and Close no longer freeze the window; results found so far stay on screen.",
+                "he": "\"עצור\", \"חדש\" וסגירת החלון כבר אינם מקפיאים אותו; התוצאות שנמצאו עד כה נשארות."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "The Search tab and the Composition Search tab each keep their own Focus Search.",
+                "he": "ללשונית החיפוש וללשונית חיפוש החיבורים יש כל אחת \"מקד חיפוש\" משלה."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "The row numbers beside a filtered results table count the shown rows only.",
+                "he": "מספרי השורות לצד טבלת תוצאות מסוננת סופרים רק את השורות המוצגות."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "web"
+                ],
+                "en": "Browse's list of search results shows the beginning of each title, and reads well in the dark theme.",
+                "he": "ברשימת תוצאות החיפוש בדף העיון מוצגת תחילת הכותרת של כל תוצאה, והיא קריאה גם בערכת הנושא הכהה."
+            },
+            {
+                "category": "fix",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "In PGP tag results, the fragments of a joined document appear together, each labelled with its document and place.",
+                "he": "בתוצאות לפי תגית PGP, הקטעים של מסמך מצורף מופיעים יחד, וכל אחד מסומן במסמך ובמקומו בו."
+            },
+            {
+                "category": "improvement",
+                "apps": [
+                    "desktop"
+                ],
+                "en": "The app's libraries are updated to their current secure versions.",
+                "he": "הספריות שהתוכנה משתמשת בהן עודכנו לגרסאותיהן המאובטחות."
+            }
+        ]
+    },
+    {
         "version": "11.3.0",
         "date": "2026-11-26",
         "apps": [

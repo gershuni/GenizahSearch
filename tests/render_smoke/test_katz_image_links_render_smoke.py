@@ -48,6 +48,10 @@ def test_halper_77_opens_penn_and_switches_the_same_verso(metadata_only, row_has
         if metadata_only:
             assert (page.p_num, page.current_idx, page.total_pages, page.folio_label) == (2, 2, 2, '1v')
             assert page.fl_id == verso
+        # The Penn button follows Browse's background lookup of the library link, which can
+        # land after the image: wait for it as for the image.
+        await _wait_until(lambda: any(isinstance(t, ui.tooltip) and t.text == 'Open in Penn Libraries'
+                                      for t in _all_elements(user)))
         penn = _button_with_tooltip(user, 'Open in Penn Libraries')
         assert penn.props['href'] == katz_viewer_url(sid)['url']
         [switch] = _button(user, 'NLI')

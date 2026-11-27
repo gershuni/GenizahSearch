@@ -111,21 +111,6 @@ Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
 
 *Triage 2026-10-25:* still open. image_loader.run keys the disk cache by FL id parsed from the URL (image_loader.py:64-72); images_nli is built only from the live nli_iiif_data canvas_map (metadata_manager.py:1256-1262), and the comment at :1236 says crossref is NOT used for image URLs. No offline FL-id resolution was added.
 
-## GS-9
-
-**Desktop Search export, filters and counts see only the loaded rows** · P2 · Desktop app · ❌ Open · opened 2026-09-25
-
-Where: `genizah_app.py::export_results`, _collect_sorted_results, load_next_batch
-
-Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
-
-- **Issue:** **Desktop Search export, filters and counts see only the loaded rows**
-- **File:** `genizah_app.py::export_results`, `_collect_sorted_results`, `_apply_results_table_filters`, `load_next_batch` (500 rows per batch)
-- **Status:** ❌ Open (2026-09-25)
-- **Notes:** A 1,200-hit search that was not scrolled exports 500 rows, and filters and "Showing X of N" apply to loaded rows only. Needs filtering and export over the result list, not the table.
-
-*Triage 2026-10-25:* still open. genizah_app.py:26743-26750 _collect_sorted_results iterates results_table.rowCount(); export_results (27890+) takes selected or visible table rows and never reads last_results or loads the remaining batches (no results_loaded / load_next_batch / last_results reference inside it); load_next_batch (23886) still adds BATCH_SIZE rows at a time.
-
 ## GS-10
 
 **The `*` search-hit marker is in-band, so a literal asterisk in source text is still ambiguous** · P2 · Desktop app · ❌ Open · opened 2026-09-03
@@ -4535,3 +4520,44 @@ placed) was slower: most texts hold the word early, and the walk stops there.
 Two ways: the same bounds over a part of the editions leg too, its pages and linked editions
 looked up as the main leg's are; or the editions leg's rows handed over before what only a shown
 row needs (the highlight pattern, the snippet) is built.
+
+## GS-313
+
+**The result viewer's previous / next stops at the loaded rows** · P3 · Desktop app · ❌ Open · opened 2026-11-27
+
+Where: `genizah_app.py::show_full_text_for_result`, `_collect_sorted_results`
+
+Left over from GS-9 (fixed 2026-11-27): the Search tab loads its results 500 at a time, and
+filters, counts and Export now cover the whole result list, but a result opened from the table
+gets the viewer's list from `_collect_sorted_results`, which reads the table's shown rows only.
+With 1,200 results and 500 loaded, the viewer says "500 of 500" on the last loaded row and next
+stops there, although the counts above the table say 1,200. Fix sketch: build the viewer's list
+from the result view (`desktop/result_view.py`) the way Export does (the loaded rows in the
+table's order, then the kept rows not loaded yet), fetching a row's details as the viewer
+reaches it.
+
+## GS-314
+
+**A column sort orders only the loaded rows** · P3 · Desktop app · ❌ Open · opened 2026-11-27
+
+Where: `genizah_app.py` results table (`setSortingEnabled(True)`), `load_next_batch`
+
+Clicking a Search results column header sorts the rows loaded so far (Qt's own table sort), and
+"Load more" then appends the next batch below them in result order, so the table is no longer in
+the sorted order. Export already writes the whole list in the sorted column's order (GS-9 part 2),
+so the table and the exported file disagree. Fix sketch: a sort over the result view's whole kept
+list, with the batches drawn in that order; or "Load more" offered as "sorted among the loaded
+rows" until all are loaded.
+
+## GS-315
+
+**Export says "Nothing to export" without saying why when only loading rows are ticked** · P3 · Desktop app · ❌ Open · opened 2026-11-27
+
+Where: `genizah_app.py::export_results`, `_results_to_export`
+
+`_results_to_export` leaves out a ticked row whose details are still loading (it is not known to
+match yet), and a selection is honoured even when it holds only such rows. Export then shows
+"Nothing to export: every result in the table is hidden by a filter or an exclusion", which is
+not the reason: nothing is hidden, the ticked rows are still loading. Fix sketch: a message of its
+own for that case ("The ticked results are still loading; try again in a moment"), or wait for
+their details before exporting.
