@@ -1884,6 +1884,18 @@ The Search tab's search worker: Stop, New, a new search and Close never wait for
     - Method `running(current)` — every worker still running (`GenizahGUI._index_readers_busy`).
 - **Function** `search_run_of(window)` — the window's SearchRun, made on first use.
 
+## desktop/result_view.py
+
+Which Search results the filters and exclusions keep, decided over the whole result list, not the rows loaded so far (GS-9). No Qt: `GenizahGUI._result_rules` gathers the window's state, and `GenizahGUI._result_text` supplies the cell texts the column filters read.
+
+- **Class** `ResultRules` — exclusions, column filters (`SHELF`, `LIBRARY`, `TITLE`, `SNIPPET`, `DOMAIN`), list, domain, printed, post-search criteria, LOCAL, "Only results with all terms".
+- **Class** `ResultView(results, rules, sid_of, text_of)` — `shown` (one verdict per result), `count`, `excluded`; `remaining_after(cursor)` ("Load more"), `shown_after(cursor)` (export), `shows_position(i)`.
+- **Class** `TextCache` — the column texts of one list, computed once; `forget(sid)` when its metadata arrives, `forget_column(TITLE)` when the translations setting changes.
+- **Function** `text_matches(text, rule)` — a column filter's verdict; a text not known yet (None) passes until its metadata is fetched.
+- **Function** `result_cells(res, meta_mgr, local_filepath)` — sid, shelfmark, title, library and LOCAL details as the table row shows them (`GenizahGUI.load_next_batch` builds its cells from it).
+- **Function** `column_text(cells, kind, fetched, unknown, resolve_title)`, `column_filters_of(filters, kinds)`, `passes(...)`, `result_key(res)`.
+- In `genizah_app.py`: `load_next_batch` draws the next kept results (`results_loaded` is the position in `last_results` up to which every kept one has a row; `RESULT_POSITION_ROLE` on the System ID item); `_apply_results_table_filters` hides or shows the loaded rows and draws again from the top (`_rerender_results`, ticks kept) when a loosened filter lets in a result passed over; `_schedule_results_refilter` runs one pass per burst of metadata; `_results_to_export` is what Export writes.
+
 ## desktop/dialogs_filter.py
 
 - **Class** `ExcludeDialog` (Line 21) — Collect system IDs or shelfmarks that should be excluded from searches. "From the shelf" (shelf picker PR 4; `purpose=`, `shelf_service=`, `shelf_store=`, passed by `genizah_app.py::open_exclude_dialog` per surface: `search_exclude` / `composition_exclude`): "Pick from the shelf" while the tree is served, and the shelf's sources listed above the tabs with Remove (shown without the tree too). The picker's confirm stages one `shelf_exclusion_source` of the picked ids (`_take_from_shelf`, corpus ids only, answering `STAGED`); shelf sources are never written into the text editor (its Apply reads the shelfmark column again through the shelf map) and `get_exclusion_sources()` returns them with either tab's sources; `done(Accepted)` consumes the staged ids from the pending choice (not those chosen again during the confirm, `_note_chosen_again`), any other close keeps it. Clear All also clears the From List selection and the shelf's sources; an edit after Resolve forgets the resolution (`_forget_resolution`), so Apply reads the editor again.

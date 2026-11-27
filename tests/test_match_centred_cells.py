@@ -227,7 +227,10 @@ def test_the_results_table_centres_the_match_and_still_filters_on_the_snippet(wi
     red = _red(cell)
     assert red is not None, "the match is not visible in the table's cell"
     assert abs(_middle(red) - cell.width() / 2) <= TOLERANCE
-    assert w._results_filter_text_for_row(0, w.COL_SNIPPET) == row["snippet"]
+    assert cell.property("filter_text") == row["snippet"]    # what "Copy Result" reads
+    w.results_filters = {w.COL_SNIPPET: {"text": row["snippet"][-30:]}}   # the Snippet filter reads the result's snippet
+    w._apply_results_table_filters()
+    assert not w.results_table.isRowHidden(0)
     w.results_table.hide()
 
 

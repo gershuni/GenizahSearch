@@ -223,16 +223,9 @@ def test_the_editions_note_is_translated():
     assert TRANSLATIONS.get(EDITIONS_NOTE)
 
 
-class _Table:
-    def rowCount(self):
-        return 2
-
-    def isRowHidden(self, row):
-        return False
-
-
 class _SummaryHost:
-    """The results line's one composer, over two shown rows."""
+    """The results line's one composer, over two shown results (the results view's
+    verdict: desktop/result_view.py, GS-9)."""
     _search_status_summary = APP._search_status_summary
     _count_text = APP._count_text
     _shown_results_capped = APP._shown_results_capped
@@ -240,9 +233,13 @@ class _SummaryHost:
     _forget_responsa_notes = APP._forget_responsa_notes
 
     def __init__(self, skipped):
-        self.results_table = _Table()
+        from desktop.result_view import ResultRules, ResultView
         self.last_results = [{}, {}]
+        self._view = ResultView(self.last_results, ResultRules(), lambda r: '', lambda r, c: '')
         self._results_editions_unavailable = skipped
+
+    def _current_result_view(self):
+        return self._view
 
 
 def test_the_results_line_says_once_that_the_editions_were_not_read(lang):

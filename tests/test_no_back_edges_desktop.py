@@ -91,6 +91,7 @@ DESKTOP_MODULES = [
     "desktop/version_history.py",        # What's New in every version + update notes, 2026-11-05
     "desktop/search_scope.py",           # Focus Search, one scope per tab (GS-13), 2026-11-26
     "desktop/search_run.py",             # the search worker's Stop / New / Close (GS-14), 2026-11-26
+    "desktop/result_view.py",            # filters, counts and export over the whole list (GS-9), 2026-11-26
     # 2026-09-25: one running copy per data folder.
     "desktop/single_instance.py",
     "desktop/shelfmark_picker.py",      # catalogue-shelfmark plan, 2026-10-18

@@ -3484,6 +3484,7 @@ TRANSLATIONS = {
     "Scope changed \u2014 results will update on next search": "הטווח השתנה \u2014 התוצאות יתעדכנו בחיפוש הבא",
     "0 results within current scope": "0 תוצאות בטווח הנוכחי",
     "Only results with all terms": "רק תוצאות עם כל המונחים",
+    "still loading": "עדיין בטעינה",
     "0 results \u2014 no manuscripts match all terms": "0 תוצאות \u2014 אין כתבי יד התואמים לכל המונחים",
     "New: Search within results — progressively narrow your search by restricting follow-up queries to manuscripts from your current result set.": "חדש: חיפוש בתוך תוצאות — צמצום הדרגתי של תוצאות חיפוש על ידי הגבלת שאילתות המשך לכתבי היד שנמצאו.",
     'Search within results — click "Search within N manuscripts" to restrict your next search to the manuscripts found. Works with all search modes.': 'חיפוש בתוך תוצאות — לחצו "חפש בתוך N כתבי יד" כדי לצמצם חיפוש לכתבי היד שנמצאו. תומך בכל מצבי החיפוש.',

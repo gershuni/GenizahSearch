@@ -664,6 +664,12 @@ def _row_of(w, sid):
             if w.results_table.item(r, w.COL_SYS_ID).text() == sid]
 
 
+def _visible(w, sid):
+    """How many rows of manuscript *sid* show. A result filtered out or excluded before
+    its batch was drawn has no row at all (GS-9: the batches draw only the kept ones)."""
+    return sum(1 for r in _row_of(w, sid) if not w.results_table.isRowHidden(r))
+
+
 def _hidden(w, sid):
     rows = _row_of(w, sid)
     assert rows, f"{sid} has no row"
@@ -740,8 +746,8 @@ def test_right_click_exclude_hides_every_row_of_the_manuscript(window, menus):
     _search(w, [_res(A, 1), _res(B, 1), _res(A, 2)])
     _menu_action(w, menus, _row_of(w, A)[0], tr("Exclude this manuscript")).trigger()
     assert w.word_excluded_sys_ids == {A}
-    assert _hidden(w, A) == [True, True], "'Exclude this manuscript' left a row of it visible"
-    assert _hidden(w, B) == [False]
+    assert _visible(w, A) == 0, "'Exclude this manuscript' left a row of it visible"
+    assert _visible(w, B) == 1
 
 
 def test_the_printed_cycle_does_not_bring_an_excluded_row_back(window):
@@ -751,7 +757,7 @@ def test_the_printed_cycle_does_not_bring_an_excluded_row_back(window):
     for state in ("hide_printed", "only_printed", "all"):
         w._open_results_filter_dialog(w.COL_PRINTED)   # the header click
         assert w._printed_filter_state == state
-        assert _hidden(w, A) == [True], f"excluded row came back at Printed={state}"
+        assert _visible(w, A) == 0, f"excluded row came back at Printed={state}"
 
 
 def test_the_next_batch_load_does_not_bring_an_excluded_row_back(window):
@@ -760,8 +766,8 @@ def test_the_next_batch_load_does_not_bring_an_excluded_row_back(window):
     w.load_next_batch(batch_size=2)
     w._exclude_word_search_result(A, _row_of(w, A)[0])
     w.load_next_batch(batch_size=2)                     # what scrolling does
-    assert w.results_table.rowCount() == 4
-    assert _hidden(w, A) == [True, True], (
+    assert w.results_table.rowCount() == 3, "the excluded later row of A was drawn (GS-9: only kept ones are)"
+    assert _visible(w, A) == 0, (
         "the scroll load showed the excluded row again, or the manuscript's later row")
     assert w.status_label.text() == _showing(2, 4, excluded=2)
 
@@ -772,14 +778,14 @@ def test_an_exclusion_holds_across_searches_until_new(window):
     w._exclude_word_search_result(A, _row_of(w, A)[0])
 
     _search(w, [_res(C, 1), _res(A, 5), _res(B, 2)])   # a later search (owner ruling)
-    assert _hidden(w, A) == [True], "a later search showed a manuscript excluded in an earlier one"
+    assert _visible(w, A) == 0, "a later search showed a manuscript excluded in an earlier one"
     assert w.status_label.text() == _showing(2, 3, excluded=1), (
         "the later search hides a row and its status line does not say so")
 
     w._reset_search()                                   # New
     assert w.word_excluded_sys_ids == set()
     _search(w, [_res(A, 1)])
-    assert _hidden(w, A) == [False], "New must end the exclusion"
+    assert _visible(w, A) == 1, "New must end the exclusion"
     assert w.status_label.text() == _showing(1, 1)
 
 
@@ -789,7 +795,7 @@ def test_the_status_counts_visible_rows_with_a_filter_and_an_exclusion(window):
     w._printed_filter_state = "hide_printed"
     w.excluded_sys_ids = {A}
     _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
-    assert _hidden(w, A) == [True] and _hidden(w, C) == [True]
+    assert _visible(w, A) == 0 and _visible(w, C) == 0
     assert w.status_label.text() == _showing(1, 3, excluded=1), (
         "the first number must be the rows the table shows")
 
@@ -803,11 +809,11 @@ def test_editing_the_exclude_list_keeps_filtered_rows_hidden(window):
     _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
     w._printed_sys_ids = {C}
     w._open_results_filter_dialog(w.COL_PRINTED)        # hide_printed: C hidden
-    assert _hidden(w, C) == [True]
+    assert _visible(w, C) == 0
     w.excluded_sys_ids = {A}
     w._rerender_with_exclusions()                       # the dialog's OK
-    assert _hidden(w, A) == [True]
-    assert _hidden(w, C) == [True], "the exclude-list re-render showed a Printed-filtered row again"
+    assert _visible(w, A) == 0
+    assert _visible(w, C) == 0, "the exclude-list re-render showed a Printed-filtered row again"
 
 
 def test_editing_the_exclude_list_rewrites_the_status_when_no_row_changes(window):
@@ -826,7 +832,7 @@ def test_the_exclude_list_applies_to_the_next_search(window):
     w = window
     w.excluded_sys_ids = {B}
     _search(w, [_res(A, 1), _res(B, 1)])
-    assert _hidden(w, B) == [True], "the Search tab's Exclude list did not apply to a new search"
+    assert _visible(w, B) == 0, "the Search tab's Exclude list did not apply to a new search"
 
 
 def test_clearing_the_last_filter_rewrites_the_status(window):
@@ -850,7 +856,7 @@ def test_removing_the_last_exclusion_rewrites_the_status(window):
     w._rerender_with_exclusions()                       # the dialog's OK
     assert w.status_label.text() == _showing(1, 2, excluded=1)
     w._remove_exclusion_source("lst", "search")         # and its per-source remove
-    assert _hidden(w, A) == [False]
+    assert _visible(w, A) == 1
     assert w.status_label.text() == _showing(2, 2), (
         "the status still counts an exclusion that no longer exists")
 
@@ -865,8 +871,8 @@ def test_domain_enrichment_does_not_bring_an_excluded_row_back(window):
     _search(w, [_res(A, 1), _res(B, 1)])
     w._exclude_word_search_result(A, _row_of(w, A)[0])
     w._on_domain_enrichment_loaded({A: [{"domain": "Bible"}], B: [{"domain": "Liturgy"}]})
-    assert _hidden(w, B) == [True]
-    assert _hidden(w, A) == [True], "domain enrichment showed the excluded manuscript again"
+    assert _visible(w, B) == 0
+    assert _visible(w, A) == 0, "domain enrichment showed the excluded manuscript again"
 
 
 def test_clearing_the_domain_filter_keeps_exclusions_and_says_so(window):
@@ -876,7 +882,7 @@ def test_clearing_the_domain_filter_keeps_exclusions_and_says_so(window):
     w._has_result_domains = True
     w._domain_exclusions = set()                        # the Domain dialog, cleared
     w._apply_domain_exclusions()
-    assert _hidden(w, A) == [True]
+    assert _visible(w, A) == 0
     assert w.status_label.text() == _showing(2, 3, excluded=1)
 
 
@@ -888,7 +894,7 @@ def test_the_domain_filter_line_counts_visible_rows_and_the_excluded(window):
     w._result_domain_map = {B: ["Liturgy"], C: ["Bible"]}
     w._domain_exclusions = {"Liturgy"}                  # the Domain dialog's OK
     w._apply_domain_exclusions()
-    assert _hidden(w, A) == [True] and _hidden(w, B) == [True]
+    assert _visible(w, A) == 0 and _visible(w, B) == 0
     assert w.status_label.text() == (
         tr("Showing {} of {} results (filtering {} domains)").format(1, 3, 1)
         + f" (1 {EXCLUDED})")
@@ -922,7 +928,7 @@ def test_a_tag_search_says_that_exclusions_hide_rows(window, monkeypatch):
     w.word_excluded_sys_ids = {A}                       # standing, from an earlier search
     w._on_tag_search_results("letters", [{"sys_id": A, "pgpid": 1},
                                          {"sys_id": B, "pgpid": 2}])
-    assert _hidden(w, A) == [True]
+    assert _visible(w, A) == 0
     assert w.status_label.text() == (
         tr("Tag: {} - {} results").format("letters", 2) + ". " + _showing(1, 2, excluded=1))
 
@@ -950,7 +956,7 @@ def test_the_all_terms_rerender_keeps_the_excluded_note(window, monkeypatch):
     w.refinement_chain = [object(), object()]
     w._all_terms_filter = True
     w._apply_all_terms_filter_and_rerender()
-    assert _hidden(w, A) == [True]
+    assert _visible(w, A) == 0
     assert w.status_label.text() == (
         _showing(1, 3, excluded=1) + f" ({tr('Only results with all terms')})")
 
@@ -1052,7 +1058,7 @@ def test_a_history_click_does_not_drop_the_current_exclude_list(window):
     w._restore_regular_search_from_state(dict(_HISTORY, excluded_sys_ids=[]), entry=None)
     _search(w, [_res(A, 1), _res(B, 1)])
     assert w.excluded_sys_ids == {B}, "the history entry replaced the Exclude list"
-    assert _hidden(w, B) == [True]
+    assert _visible(w, B) == 0
     assert w.lbl_main_exclude_status.text() == label
 
 
@@ -1062,7 +1068,7 @@ def test_a_history_click_does_not_install_an_old_exclude_list(window):
     _search(w, [_res(A, 1), _res(B, 1)])
     assert w.excluded_sys_ids == set(), (
         "the history entry installed ids the label and the dialog know nothing of")
-    assert _hidden(w, B) == [False]
+    assert _visible(w, B) == 1
 
 
 # --------------------------------------------------------------------------
@@ -1135,15 +1141,15 @@ def test_both_exclusion_sets_and_the_label_survive_a_restart(restore, case):
     assert w.excluded_sys_ids == {B}, "the Exclude Manuscripts list did not survive the restart"
     assert "1" in w.lbl_main_exclude_status.text(), "the Exclude label says nothing is excluded"
     _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
-    assert _hidden(w, A) == [True] and _hidden(w, B) == [True]
+    assert _visible(w, A) == 0 and _visible(w, B) == 0
     assert w.status_label.text() == _showing(1, 3, excluded=2)
 
 
 def test_a_restored_search_hides_what_the_restored_exclusions_exclude(restore):
     w = restore(_session_state(results=[_res(A, 1), _res(B, 1), _res(C, 1)]), "always")
-    assert _hidden(w, A) == [True], "the replay ran before the right-click set was restored"
-    assert _hidden(w, B) == [True], "the replay ignored the Exclude Manuscripts list"
-    assert _hidden(w, C) == [False]
+    assert _visible(w, A) == 0, "the replay ran before the right-click set was restored"
+    assert _visible(w, B) == 0, "the replay ignored the Exclude Manuscripts list"
+    assert _visible(w, C) == 1
 
 
 # --------------------------------------------------------------------------
@@ -1257,7 +1263,7 @@ def test_old_bounds_in_the_composition_filters_keep_the_search_rows(restore, mon
     state["pre_search_filters"] = dict(BIBLE)
     state["comp_pre_search_filters"] = {"include_mode": True, "width_min": 10.0}
     w = restore(state, "always")
-    assert w.results_table.rowCount() == 1, "the Search rows went with the Composition tab's old bounds"
+    assert len(w.last_results) == 1, "the Search rows went with the Composition tab's old bounds"
     assert w.comp_pre_search_filters == {"include_mode": True}
 
 
@@ -1341,10 +1347,10 @@ def test_post_search_criteria_hide_the_rows_they_do_not_keep(window):
     w._post_criteria = {"width": {"min": 10.0}}
     w._post_criteria_ids = frozenset({A})
     _search(w, [_res(A, 1), _res(B, 1)])
-    assert _hidden(w, A) == [False] and _hidden(w, B) == [True]
+    assert _visible(w, A) == 1 and _visible(w, B) == 0
     w._post_criteria, w._post_criteria_ids = {}, None
     w._apply_results_table_filters()
-    assert _hidden(w, B) == [False]
+    assert _visible(w, B) == 1
 
 
 # --------------------------------------------------------------------------
@@ -1473,28 +1479,31 @@ def _search_in_flight(w, results):
     _search(w, results)
 
 
-def test_load_more_appears_when_the_whole_first_batch_is_excluded(load_more):
+def test_the_first_batch_skips_the_excluded_results(load_more):
+    """GS-9: an excluded first batch left an empty table and a count above it. The
+    batch now draws the next kept results, and the line counts the whole list."""
     w = load_more
     w.excluded_sys_ids = {A}
     _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
-    assert w.status_label.text() == _showing(0, 50, excluded=20)
-    assert _load_more_state(w) == (True, _load_more_text(30)), (
-        "the first batch is all excluded and nothing can scroll: batch 2 is unreachable")
+    assert {w.results_table.item(r, w.COL_SYS_ID).text() for r in range(w.results_table.rowCount())} == {B}
+    assert w.results_table.rowCount() == 20 and _visible(w, B) == 20
+    assert w.status_label.text() == _showing(30, 50, excluded=20)
+    assert w._current_result_view().remaining_after(w.results_loaded) == 10
 
 
-def test_load_more_appears_after_a_restore_whose_first_batch_is_excluded(load_more, restore):
+def test_a_restore_whose_first_batch_is_excluded_draws_the_kept_ones(load_more, restore):
     w = restore(_session_state(results=_rows(A, 50) + _rows(B, 50), word=(A,), listed=()),
                 "always")
-    assert w.results_table.rowCount() == 50                 # the restore's first batch
-    assert _load_more_state(w) == (True, _load_more_text(50)), (
-        "the restore replayed a fully excluded first batch and left nothing to load the rest")
+    assert w.results_table.rowCount() == 50 and _visible(w, B) == 50   # the restore's first batch
+    assert _load_more_state(w)[0] is False, "nothing is left to load"
 
 
 def test_load_more_is_hidden_while_the_restore_runs(load_more):
     w = load_more
+    _resize_results(w, 900, 3000)                           # 50 rows fit: nothing scrolls
     w.excluded_sys_ids = {A}
     w._restoring_session = True
-    _search(w, _rows(A, 50) + _rows(B, 30))                 # a restore's first batch is 50
+    _search(w, _rows(A, 50) + _rows(B, 80))                 # a restore's first batch is 50
     assert w.results_table.rowCount() == 50
     assert _load_more_state(w)[0] is False
     w._restoring_session = False
@@ -1534,11 +1543,11 @@ def test_a_click_loads_exactly_one_batch_and_updates_the_count(load_more):
     _resize_results(w, 900, 2000)           # no batch here ever overflows the view
     w.excluded_sys_ids = {A}
     _search_in_flight(w, _rows(A, 40) + _rows(B, 30))
-    assert _load_more_state(w) == (True, _load_more_text(50))
+    assert _load_more_state(w) == (True, _load_more_text(10))
     w.btn_load_more_results.click()
-    assert w.results_table.rowCount() == 40 and w.results_loaded == 40
-    assert _load_more_state(w) == (True, _load_more_text(30))
-    assert w.status_label.text() == _showing(0, 70, excluded=40)
+    assert w.results_table.rowCount() == 30 and w.results_loaded == 70
+    assert _load_more_state(w)[0] is False
+    assert w.status_label.text() == _showing(30, 70, excluded=40)
 
 
 class _Signal:
@@ -1580,12 +1589,17 @@ def _start_a_search_that_never_lands(w, monkeypatch, thread_cls=_IdleSearchThrea
     return w.search_thread
 
 
+def _five_loaded(w, monkeypatch, more=30):
+    """Five rows loaded and *more* results not: the rows fit, so "Load more" shows."""
+    monkeypatch.setattr(app, "BATCH_SIZE", 5)
+    _search_in_flight(w, _rows(B, 5 + more))
+
+
 def test_load_more_is_hidden_while_a_search_runs(load_more, monkeypatch):
     """start_search empties the table; a click on the button then would
     render the previous run's results into the new run's table."""
     w = load_more
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    _five_loaded(w, monkeypatch)
     assert _load_more_state(w)[0] is True
     _start_a_search_that_never_lands(w, monkeypatch)   # the next search, still running
     assert _load_more_state(w)[0] is False, (
@@ -1600,8 +1614,7 @@ def test_load_more_offers_nothing_after_a_search_that_delivered_nothing(
     previous run's results, and a click rendered 20 of them under the new
     query ("Showing 20 of 50 results")."""
     w = load_more
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    _five_loaded(w, monkeypatch)
     assert _load_more_state(w)[0] is True
     _start_a_search_that_never_lands(w, monkeypatch)
     if ending == "an error":
@@ -1747,17 +1760,16 @@ def test_new_drops_a_tag_search_that_lands_after_it(load_more, monkeypatch):
     assert w.results_table.rowCount() == 1
 
 
-def test_a_click_is_checked_again_and_loads_nothing_while_a_search_runs(load_more):
+def test_a_click_is_checked_again_and_loads_nothing_while_a_search_runs(load_more, monkeypatch):
     """The button only shows the state; a click re-checks it. With a run
     landing its results (nothing has recomputed the button yet), a click
     loads nothing."""
     w = load_more
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    _five_loaded(w, monkeypatch)
     assert _load_more_state(w)[0] is True
     w.is_searching = True
     w.btn_load_more_results.click()
-    assert w.results_table.rowCount() == 20 and w.results_loaded == 20, (
+    assert w.results_table.rowCount() == 5 and w.results_loaded == 5, (
         "a click loaded a batch while a search was running")
 
 
@@ -1783,10 +1795,9 @@ def _assert_under_the_rows(w):
         f"not centred under the table: {shown} under {t}")
 
 
-def test_load_more_sits_under_the_rows_and_follows_a_resize(load_more):
+def test_load_more_sits_under_the_rows_and_follows_a_resize(load_more, monkeypatch):
     w = load_more
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    _five_loaded(w, monkeypatch)
     assert _load_more_state(w)[0] is True
     _assert_under_the_rows(w)
     _resize_results(w, 1300, 700)           # the scroll range stays 0
@@ -1794,7 +1805,7 @@ def test_load_more_sits_under_the_rows_and_follows_a_resize(load_more):
     _assert_under_the_rows(w)
 
 
-def test_load_more_covers_no_row_when_the_rows_just_fill_the_table(load_more):
+def test_load_more_covers_no_row_when_the_rows_just_fill_the_table(load_more, monkeypatch):
     """No scroll range is not room under the rows: twelve rows in a viewport
     3 px taller than they are cannot scroll, and the button floated over the
     viewport's bottom covered the last one. Under the table it squeezes the
@@ -1805,8 +1816,8 @@ def test_load_more_covers_no_row_when_the_rows_just_fill_the_table(load_more):
     overhead = table.height() - table.viewport().height()   # headers, frame, bars
     _resize_results(w, 900, 12 * table.verticalHeader().defaultSectionSize() + 3 + overhead)
     assert table.viewport().height() == 12 * table.verticalHeader().defaultSectionSize() + 3
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(B, 12) + _rows(A, 38))       # 12 of the first 20 visible
+    monkeypatch.setattr(app, "BATCH_SIZE", 12)
+    _search_in_flight(w, _rows(B, 42))                      # 12 loaded, 30 not
     assert _load_more_state(w)[0] is True
     _assert_under_the_rows(w)
     assert table.verticalScrollBar().maximum() > 0, "the button's row squeezed no row out"
@@ -1815,24 +1826,22 @@ def test_load_more_covers_no_row_when_the_rows_just_fill_the_table(load_more):
         _assert_under_the_rows(w)
 
 
-def test_load_more_fits_its_label_when_the_count_grows(load_more):
+def test_load_more_fits_its_label_when_the_count_grows(load_more, monkeypatch):
     """A later search can count many more unloaded results than the last,
     with no resize in between to place the button again."""
     w = load_more
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(A, 20) + _rows(B, 5))
+    _five_loaded(w, monkeypatch, more=5)
     assert _load_more_state(w) == (True, _load_more_text(5))
-    _search_in_flight(w, _rows(A, 20) + _rows(B, 1000))
+    _five_loaded(w, monkeypatch, more=1000)
     assert _load_more_state(w) == (True, _load_more_text(1000))
     btn = w.btn_load_more_results
     assert btn.width() >= btn.sizeHint().width(), "the label no longer fits the button"
     _assert_under_the_rows(w)
 
 
-def test_load_more_stays_centred_when_the_table_scrolls_sideways(load_more):
+def test_load_more_stays_centred_when_the_table_scrolls_sideways(load_more, monkeypatch):
     w = load_more
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    _five_loaded(w, monkeypatch)
     w.results_table.setColumnWidth(w.COL_SNIPPET, 4000)
     QApplication.processEvents()
     bar = w.results_table.horizontalScrollBar()
@@ -1910,13 +1919,12 @@ def test_the_built_search_tab_puts_load_more_right_under_the_results(search_tab)
     assert btn.isHidden(), "the button shows at startup, with nothing to load"
 
 
-def test_load_more_does_not_widen_the_search_footer(search_tab):
+def test_load_more_does_not_widen_the_search_footer(search_tab, monkeypatch):
     """In the footer layout the button raised the row's minimum width by
     its whole label (734 to 1,174 px), and it shows exactly when the table
     has room to spare -- the window could no longer be as narrow."""
     w, panel = search_tab
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    _five_loaded(w, monkeypatch)
     assert _load_more_state(w) == (True, _load_more_text(30))
     footer = _footer(w, panel)
     footer.invalidate()
@@ -1927,10 +1935,9 @@ def test_load_more_does_not_widen_the_search_footer(search_tab):
 
 
 @pytest.mark.parametrize("ending", ["New", "a zero-result search", "a zero-result tag search"])
-def test_load_more_does_not_outlive_the_results_it_counted(load_more, ending):
+def test_load_more_does_not_outlive_the_results_it_counted(load_more, ending, monkeypatch):
     w = load_more
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    _five_loaded(w, monkeypatch)
     assert _load_more_state(w)[0] is True
     if ending == "New":
         w._reset_search()
@@ -1947,11 +1954,10 @@ def _table_uids(w):
             for r in range(t.rowCount())]
 
 
-def test_the_all_terms_view_offers_no_load_more_and_a_click_loads_nothing(load_more, monkeypatch):
-    """The all-terms view renders a filtered copy of last_results and puts
-    the full set back, so results_loaded counts positions in the copy. A
-    click read the full set from there: rows matching only some terms, and
-    rows already shown, and a status line without the view's note."""
+def test_the_all_terms_view_pages_only_the_matching_results(load_more, monkeypatch):
+    """The all-terms view rendered a filtered copy of last_results and offered no
+    "Load more". It is a rule of the results view now (GS-9): the count is the whole
+    list's, and a click loads the next matching results, never one already shown."""
     w = load_more
     _resize_results(w, 900, 2000)           # 20 rows fit: nothing scrolls
     matching = {f"{A}_{p}" for p in range(1, 31)}
@@ -1964,18 +1970,13 @@ def test_the_all_terms_view_offers_no_load_more_and_a_click_loads_nothing(load_m
     w._apply_all_terms_filter_and_rerender()
     suffix = f" ({tr('Only results with all terms')})"
     assert _table_uids(w) == [f"{A}_{p}" for p in range(1, 21)]
-    assert w.status_label.text() == _showing(20, 50) + suffix
+    assert w.status_label.text() == _showing(30, 50) + suffix
 
-    assert _load_more_state(w)[0] is False, "Load more is offered in the all-terms view"
-    w.btn_load_more_results.click()         # a hidden button's click() still fires
-    rows = _table_uids(w)
-    assert set(rows) <= matching, "a click loaded rows that do not match all terms"
-    assert len(rows) == len(set(rows)), "a click loaded rows already shown"
-    assert w.status_label.text() == _showing(20, 50) + suffix
-
-    w._all_terms_filter = False             # the view off: the full set again
-    w._apply_all_terms_filter_and_rerender()
-    assert _load_more_state(w) == (True, _load_more_text(30))
+    assert _load_more_state(w) == (True, _load_more_text(10))
+    w.btn_load_more_results.click()
+    assert _table_uids(w) == [f"{A}_{p}" for p in range(1, 31)]
+    assert w.status_label.text() == _showing(30, 50) + suffix
+    assert _load_more_state(w)[0] is False
 
 
 def test_the_load_more_label_has_a_hebrew_translation():

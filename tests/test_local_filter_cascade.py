@@ -31,8 +31,10 @@ def _function_contains_call(func_node, name: str) -> bool:
 
 #: A joinpoint may reach the LOCAL helpers through ONE named delegate. The composition
 #: tree and the Manuscript Viewer share one filter rule (desktop/comp_view_filter.py);
-#: its state -- including LOCAL -- is built in _comp_filter_state, which both call.
-_DELEGATES = {'_apply_comp_tree_filters': '_comp_filter_state'}
+#: its state -- including LOCAL -- is built in _comp_filter_state, which both call. The
+#: Search results' rules, LOCAL included, are built in _result_rules (GS-9, desktop/result_view.py).
+_DELEGATES = {'_apply_comp_tree_filters': '_comp_filter_state',
+              '_apply_results_table_filters': '_result_rules'}
 
 
 def _reaches_call(func_node, name: str, funcs_by_name: dict) -> bool:

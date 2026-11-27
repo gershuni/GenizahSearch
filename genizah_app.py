@@ -54,6 +54,7 @@ from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from desktop.startup_work import StartupWork, shelfmark_completer_rows
 from desktop.search_scope import COMPOSITION, SEARCH, TABS, scope_of, scope_property, tab_for_index
 from desktop.search_run import search_run_of
+import desktop.result_view as rv
 from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, CompoundCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
 from desktop.widgets import (
     text_has_pattern_markers,
@@ -10552,6 +10553,10 @@ class GenizahGUI(QMainWindow):
             title_item = self.results_table.item(row, self.COL_TITLE)
             if title_item:
                 title_item.setText(_resolve_display_title(sys_id, title_item.toolTip(), compact=True))
+        # A Title filter reads the titles in the new language too (Codex F5 on the GS-9 plan).
+        if getattr(self, 'last_results', None):
+            self._result_texts().forget_column(rv.TITLE)
+            self._apply_results_table_filters()
 
     def _browse_toggle_translations(self, checked):
         """Toggle show_translations from browse tab toolbar button."""
@@ -25430,31 +25435,19 @@ class GenizahGUI(QMainWindow):
 
     def _load_more_remaining(self):
         """How many results "Load more results" reaches, or 0 when it must
-        offer none: nothing unloaded, a run still landing its results
+        offer none: no kept result unloaded (the filters and exclusions decide
+        over the whole list, GS-9), a run still landing its results
         (reset_ui recomputes as it ends), a restore running (its last step
-        recomputes), the "Only results with all terms" view (see
-        _all_terms_view_active), or rows that overflow the table
-        (scrolling loads; see _results_rows_fit)."""
-        remaining = len(getattr(self, 'last_results', None) or []) - getattr(self, 'results_loaded', 0)
-        if (remaining <= 0
+        recomputes), or rows that overflow the table (scrolling loads; see
+        _results_rows_fit)."""
+        if (not getattr(self, 'last_results', None)
                 or getattr(self, 'is_searching', False)
-                or getattr(self, '_restoring_session', False)
-                or self._all_terms_view_active()
-                or not self._results_rows_fit()):
+                or getattr(self, '_restoring_session', False)):
+            return 0
+        remaining = self._current_result_view().remaining_after(getattr(self, 'results_loaded', 0))
+        if remaining <= 0 or not self._results_rows_fit():
             return 0
         return remaining
-
-    def _all_terms_view_active(self):
-        """True while "Only results with all terms" narrows the table.
-
-        _apply_all_terms_filter_and_rerender renders a filtered copy of
-        last_results and then puts the full set back, so results_loaded
-        counts positions in the copy. A batch read from last_results at that
-        position would bring rows matching only some of the terms, and rows
-        already shown. The same condition as that method's filter."""
-        chain = getattr(self, 'refinement_chain', None)
-        return bool(getattr(self, '_all_terms_filter', False) and chain
-                    and compute_all_terms_filter(chain) is not None)
 
     def _update_load_more_button(self, *_):
         """Show "Load more results" exactly when _load_more_remaining says
@@ -25475,6 +25468,122 @@ class GenizahGUI(QMainWindow):
         if self._load_more_remaining():
             self.load_next_batch()
 
+    # A results row's place in last_results (on its System ID item; GS-9).
+    RESULT_POSITION_ROLE = Qt.ItemDataRole.UserRole + 1
+
+    def _result_cells(self, res):
+        return rv.result_cells(res, self.meta_mgr, self._lookup_local_filepath)
+
+    def _result_texts(self):
+        cache = self.__dict__.get('_result_text_cache')
+        if cache is None:
+            cache = self.__dict__['_result_text_cache'] = rv.TextCache()
+        return cache.for_list(self.last_results)
+
+    def _result_sid(self, res):
+        return self._result_texts().get(res, 'sid', '', lambda: self._result_cells(res)[0])
+
+    def _result_text(self, res, kind):
+        """The text of *res*'s cell a column filter reads, or None while its metadata is
+        still to be fetched (it passes until then: desktop/result_view.py::text_matches)."""
+        if kind == rv.SNIPPET:
+            return res.get('snippet', '') or ''
+        sid = self._result_sid(res)
+        if kind == rv.DOMAIN:
+            return ", ".join(self._domain_display_name(d) for d in self._result_domain_map.get(sid, []))
+        translations = getattr(self, '_view_show_translations', False)
+        return self._result_texts().get(res, kind, sid, lambda: rv.column_text(
+            self._result_cells(res), kind,
+            lambda s: s in self.meta_mgr.nli_cache or s in self._pending_fetches().done, tr("Unknown"),
+            lambda s, t: _resolve_display_title(s, t, compact=True, show_translations=translations)))
+
+    def _pending_fetches(self):
+        return self.__dict__.setdefault('_pending_fetch', rv.PendingFetches()).for_list(self.last_results)
+
+    def _fetch_pending_metadata(self, view):
+        """Fetch the undrawn results a filter keeps only for want of details (Codex on #150)."""
+        state = self._pending_fetches()
+        state.waiting.update(state.to_ask(self._result_sid(self.last_results[i]) for i in view.pending))
+        if state.waiting and not (self.meta_loader and self.meta_loader.isRunning()):
+            ids, state.waiting = sorted(state.waiting), set()   # never cancel a load to wait for it
+            self.start_metadata_loading(ids)
+
+    def _result_rules(self):
+        """The window's filters and exclusions as one desktop/result_view.py::ResultRules."""
+        # Phase 95 REQ-6 / Phase 96 D-F1: the LOCAL three-state filter and the opt-outs.
+        local_state = getattr(self, '_local_filter_state_search', 'all')
+        local_kept = self._apply_local_optout_filter(
+            self._apply_local_filter(getattr(self, 'last_results', []) or [], local_state))
+        local_active = (local_state != 'all' or bool(getattr(self, '_local_file_optouts', set())))
+        local_ids = ({(r.get('display', {}) or {}).get('id') for r in local_kept}
+                     if local_active and not self._local_filter_inactive_chip_visible else None)
+        self._show_local_filter_chip('search', self._local_filter_inactive_chip_visible)
+        return rv.rules_from_window(self, {self.COL_SHELF: rv.SHELF, self.COL_LIBRARY: rv.LIBRARY,
+                                           self.COL_TITLE: rv.TITLE, self.COL_SNIPPET: rv.SNIPPET,
+                                           self.COL_DOMAIN: rv.DOMAIN}, local_ids)
+
+    def _rebuild_result_view(self, rules=None):
+        """Decide again which results show (GS-9), and keep the verdict."""
+        results = self.last_results if self.last_results is not None else []
+        self._view_show_translations = bool(load_app_config().get('show_translations', False))
+        view = rv.ResultView(results, rules or self._result_rules(), self._result_sid, self._result_text)
+        self._result_view, self._search_rows_excluded = view, view.excluded   # "(N excluded)"
+        return view
+
+    def _current_result_view(self):
+        """The verdict on the results shown now, decided again if the list was replaced."""
+        view = getattr(self, '_result_view', None)
+        results = self.last_results if self.last_results is not None else []
+        if view is None or view.results is not results or len(view.shown) != len(results):
+            view = self._rebuild_result_view()
+        return view
+
+    def _rerender_results(self):
+        """Build the table again from the top (a loosened filter lets in results passed over
+        before the last loaded row), ticks kept and drawn as deep as the deepest (Codex F4)."""
+        table = self.results_table
+        def position(row):  # noqa: E306 (the ratchet counts the blank line)
+            item = table.item(row, self.COL_SYS_ID)
+            return item.data(self.RESULT_POSITION_ROLE) if item is not None else None
+        ticked = set()
+        for row in range(table.rowCount()):
+            box = table.item(row, self.COL_CHECKBOX)
+            if box is not None and box.checkState() == Qt.CheckState.Checked:
+                ticked.add(position(row))
+        view = self._current_result_view()
+        deepest = max((p for p in ticked if view.shows_position(p)), default=-1)
+        rows = max(BATCH_SIZE, sum(view.shown[:deepest + 1]))
+        table.setRowCount(0)
+        self.results_loaded = 0
+        self.result_row_by_sys_id, self.shelfmark_items_by_sid, self.title_items_by_sid = {}, {}, {}
+        self.load_next_batch(batch_size=rows)
+        if ticked:
+            table.blockSignals(True)
+            for row in range(table.rowCount()):
+                box = table.item(row, self.COL_CHECKBOX)
+                if box is not None and position(row) in ticked:
+                    box.setCheckState(Qt.CheckState.Checked)
+            table.blockSignals(False)
+        self._update_search_export_label()
+        table.scrollToTop()
+
+    def _schedule_results_refilter(self):
+        """One visibility pass for a burst of metadata arrivals, not one per manuscript."""
+        timer = self.__dict__.get('_refilter_timer')
+        if timer is None:
+            timer = self.__dict__['_refilter_timer'] = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._run_scheduled_refilter)
+        if not timer.isActive():
+            timer.start(150)
+
+    def _run_scheduled_refilter(self):
+        try:
+            if not getattr(self, '_app_shutting_down', False):
+                self._apply_results_table_filters()
+        except RuntimeError:     # the table went with the window
+            pass
+
     def load_next_batch(self, batch_size=None, keep_sorting_off=False, skip_metadata=False):
         """Add the next rows of last_results to the table. *keep_sorting_off*: a
         preview's rows must stay in engine order; turning sorting back on at the
@@ -25484,70 +25593,39 @@ class GenizahGUI(QMainWindow):
         started here made the next preview wait on the GUI thread for the one
         still running (start_metadata_loading cancels and waits -- Codex review
         of PR #375)."""
-        if self.results_loaded >= len(self.last_results):
+        # The next results the filters and exclusions keep (GS-9: they decide over the
+        # whole list, desktop/result_view.py); results_loaded is the position in
+        # last_results up to which every kept result has a row.
+        view = self._current_result_view()
+        start_idx = idx = self.results_loaded
+        want = batch_size or BATCH_SIZE
+        batch, positions = [], []
+        while idx < len(self.last_results) and len(batch) < want:
+            if view.shown[idx]:
+                batch.append(self.last_results[idx])
+                positions.append(idx)
+            idx += 1
+        if idx == start_idx:
             return
-
-        # Determine range
-        start_idx = self.results_loaded
-        end_idx = min(start_idx + (batch_size or BATCH_SIZE), len(self.last_results))
-        batch = self.last_results[start_idx:end_idx]
-
-        if not batch: return
+        if not batch:                    # every result left is filtered out
+            self.results_loaded = idx
+            self._update_load_more_button()
+            return
 
         self.results_table.setSortingEnabled(False)
         current_row = self.results_table.rowCount()
         self.results_table.setRowCount(current_row + len(batch))
 
         ids_to_fetch = []
+        show_translations = bool(load_app_config().get('show_translations', False))   # read once, not per row
 
         for i, res in enumerate(batch):
             row_idx = current_row + i
             meta = res['display']
-            parsed = self.meta_mgr.parse_full_id_components(res.get('raw_header', ''))
-            sid = parsed['sys_id'] or meta.get('id')
-
-            # Phase 95 smoke-fix items (A): LOCAL hits use display dict for
-            # shelfmark (filename) and library (parent_folder/folder_name).
-            _is_local_hit = meta.get('source') == 'LOCAL'
-
-            # Metadata Check
-            if _is_local_hit:
-                # LOCAL hits: shelfmark = filename from display dict (set by indexer).
-                # get_meta_for_id strips all non-digit chars from LOCAL sys_ids → always "Unknown".
-                shelf = meta.get('shelfmark', '') or sid
-                title = meta.get('title', '')
-                library_code = ''
-                needs_fetch = False
-                # Compute parent_folder/folder_name for Library column.
-                _local_library_display = ''
-                try:
-                    _fp = self._lookup_local_filepath(sid)
-                    if _fp:
-                        # Phase 110 bug #2: prefer the real filename from the
-                        # canonical filepath. The regular LOCAL index stores the
-                        # basename in `shelfmark`, but the LOCAL LAB side-index
-                        # stores the sys_id there — so Lab-Mode LOCAL hits would
-                        # otherwise show the bare 97… sys_id. Deriving from the
-                        # filepath is identical to the basename for regular LOCAL
-                        # hits (no regression) and yields the filename for LAB hits.
-                        _basename = os.path.basename(_fp)
-                        if _basename:
-                            shelf = _basename
-                        _dir = os.path.dirname(_fp)
-                        _folder = os.path.basename(_dir)
-                        _parent = os.path.basename(os.path.dirname(_dir))
-                        if _parent:
-                            _local_library_display = f"{_parent}/{_folder}"
-                        else:
-                            _local_library_display = _folder
-                except Exception:
-                    _local_library_display = ''
-            else:
-                _local_library_display = ''
-                shelf, title = self.meta_mgr.get_meta_for_id(sid)
-                library_code = self.meta_mgr.get_library_for_id(sid)
-                needs_fetch = (shelf == "Unknown" and (not title))
-                if needs_fetch: ids_to_fetch.append(sid)
+            sid, shelf, title, library_code, _local_library_display, _is_local_hit, needs_fetch = \
+                self._result_cells(res)
+            if needs_fetch:
+                ids_to_fetch.append(sid)
 
             # Checkbox
             item_chk = QTableWidgetItem()
@@ -25593,6 +25671,8 @@ class GenizahGUI(QMainWindow):
             # System ID
             item_sid = QTableWidgetItem(sid)
             item_sid.setData(Qt.ItemDataRole.UserRole, res)
+            # Its place in last_results: the data above comes back as a copy, not this dict.
+            item_sid.setData(self.RESULT_POSITION_ROLE, positions[i])
             self.results_table.setItem(row_idx, self.COL_SYS_ID, item_sid)
 
             # Shelf/Title/Library
@@ -25601,7 +25681,8 @@ class GenizahGUI(QMainWindow):
                 item_title = QTableWidgetItem(tr("Loading..."))
             else:
                 item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
-                display_title = _resolve_display_title(sid, title, compact=True) if sid else (title or "")
+                display_title = (_resolve_display_title(sid, title, compact=True, show_translations=show_translations)
+                                 if sid else (title or ""))
                 item_title = QTableWidgetItem(display_title)
                 if title and title != display_title:
                     item_title.setToolTip(title)
@@ -25700,10 +25781,10 @@ class GenizahGUI(QMainWindow):
 
             self._update_search_row_list_indicator(row_idx, res)
 
-        self.results_loaded = end_idx
+        self.results_loaded = idx
         if not keep_sorting_off:
             self.results_table.setSortingEnabled(True)
-        self._apply_results_table_filters()
+        self._update_load_more_button()   # the new rows are all kept ones: nothing to hide
 
         # Update Status: the rows actually visible, with the excluded note
         # (exclusions outlive the search that made them) and the expanded
@@ -26225,7 +26306,12 @@ class GenizahGUI(QMainWindow):
         # The first rows are on screen by now: this is the wait the user sees.
         logger.info("search_first_paint since_submit_ms=%d rows_shown=%d",
                     int(self._pause_search.elapsed(time.monotonic()) * 1000), self.results_loaded)
-        missing = target - self.results_loaded
+        if not self._current_result_view().remaining_after(self.results_loaded):
+            return                                          # every kept result is drawn
+        try:
+            missing = target - self.results_table.rowCount()   # rows drawn, not list positions (GS-9)
+        except RuntimeError:
+            return                                          # the window went before the timer fired
         if missing <= 0:
             return
         self.load_next_batch(batch_size=missing)
@@ -26671,29 +26757,13 @@ class GenizahGUI(QMainWindow):
         common_uids = None
         if self._all_terms_filter and self.refinement_chain:
             common_uids = compute_all_terms_filter(self.refinement_chain)
-        if common_uids is not None:
-            filtered = [r for r in self.last_results if (r.get('uid') or r.get('display', {}).get('id')) in common_uids]
-        else:
-            filtered = self.last_results
-        # Swap last_results, re-render, then restore
-        original = self.last_results
-        self.last_results = filtered
-        self.results_table.setRowCount(0)
-        self.results_loaded = 0
-        self.result_row_by_sys_id = {}
-        self.shelfmark_items_by_sid = {}
-        self.title_items_by_sid = {}
-        self.load_next_batch()
-        self.last_results = original  # restore full set for future operations
-        # Hides "Load more results" while the view is filtered (a click reads
-        # the full set); offers it again, counted on the full set, when not.
+        # One more rule of the results view (GS-9), for this list only: a new list
+        # shows unfiltered until its chain is complete and this runs again.
+        self._all_terms_applied = (self.last_results, common_uids)
+        self._rebuild_result_view()
+        self._rerender_results()
         self._update_load_more_button()
-        n_shown = len(filtered)
-        n_total = len(original)
-        if n_shown < n_total:
-            # Counted from the table, so exclusions and filters are honest.
-            self.status_label.setText(
-                f"{self._search_status_summary()} ({tr('Only results with all terms')})")
+        self.status_label.setText(self._search_status_summary())   # it says when the view narrows
 
     def _clear_refinement_chain(self):
         """D-11: Remove entire chain, return to unrestricted search."""
@@ -26851,18 +26921,6 @@ class GenizahGUI(QMainWindow):
     def _update_results_filter_indicators(self):
         for column in (self.COL_SHELF, self.COL_TITLE, self.COL_SNIPPET, self.COL_DOMAIN):
             self.chk_search_header.set_filter_active(column, column in self.results_filters)
-
-    def _results_filter_text_for_row(self, row, column):
-        if column == self.COL_SNIPPET:
-            widget = self.results_table.cellWidget(row, column)
-            if widget is not None:
-                raw = widget.property("filter_text")
-                if raw:
-                    return str(raw)
-                if hasattr(widget, "text"):
-                    return widget.text()
-        item = self.results_table.item(row, column)
-        return item.text() if item else ""
 
     # ------------------------------------------------------------------
     # Phase 95 REQ-6 D-10 D-39 — LOCAL three-state filter
@@ -27175,8 +27233,7 @@ class GenizahGUI(QMainWindow):
         claim more visible rows than the table shows or drop the note saying
         exclusions hide some.
         """
-        table = self.results_table
-        visible = sum(1 for r in range(table.rowCount()) if not table.isRowHidden(r))
+        visible = self._current_result_view().count     # over the whole list (GS-9)
         total = self._count_text(len(self.last_results) if self.last_results else 0,
                                  self._shown_results_capped())
         expanded = getattr(self, '_responsa_expanded_count', 0)
@@ -27194,22 +27251,29 @@ class GenizahGUI(QMainWindow):
         else:
             text = tr("Showing {} of {} results").format(visible, total)
         text += self._search_excluded_note()
+        if self._current_result_view().pending:          # their details decide the filter
+            text += f" ({len(self._current_result_view().pending)} {tr('still loading')})"
         if getattr(self, '_search_was_cancelled', False):
             text += f" ({tr('Partial results')})"
         if getattr(self, '_responsa_warning', None):
             text += f" · {self._responsa_warning}"
         # How many results matched in a scholarly transcription, and whether they could not
         # be searched for these results (their index not open yet).
-        return (text + _editions_match_note(getattr(self, 'last_results', None))
+        text = (text + _editions_match_note(getattr(self, 'last_results', None))
                 + _editions_not_searched_note(getattr(self, '_results_editions_unavailable', False)))
+        uids = self._current_result_view().rules.all_terms_uids
+        if uids is not None and any(rv.result_key(r) not in uids for r in self.last_results):
+            text += f" ({tr('Only results with all terms')})"     # on every line, a batch load's too
+        return text
 
     def _with_search_summary(self, message):
-        """`message`, followed by the results summary when any row is hidden,
+        """`message`, followed by the results summary when any result is hidden,
         so a message that replaces the summary does not hide that fact. Two
         sentences: a full stop ends `message` unless punctuation already
         does ("Tag: letters - 2 results. Showing 1 of 2 results ...")."""
-        table = self.results_table
-        if any(table.isRowHidden(r) for r in range(table.rowCount())):
+        # Asked of the whole list, not the table: the table holds only the kept results
+        # loaded so far, none of them hidden (Codex F6 on the plan).
+        if self._current_result_view().count < len(self.last_results or []):
             message = message.rstrip()
             if not message.endswith(('.', '!', '?', ':')):
                 message += '.'
@@ -27217,138 +27281,43 @@ class GenizahGUI(QMainWindow):
         return message
 
     def _apply_results_table_filters(self):
-        """Recompute the visibility of every Search results row.
+        """Decide again which Search results show, and show the table that way.
 
-        The one pass that decides it: the manuscript exclusions first, then
-        the filters. Writes the status summary when it changed any row or the
-        excluded count, and returns how many rows the exclusions hide.
+        The one pass that decides it (desktop/result_view.py, over the whole result list,
+        GS-9): the manuscript exclusions first, then the filters. The loaded rows are hidden
+        or shown; a loosened filter that lets in a result passed over before the last loaded
+        row builds the table again from the top. Writes the status summary when the visible
+        set or the excluded count changed, and returns how many results the exclusions hide.
         """
-        # 1. Gather rules
-        list_active = self.list_filter_state.get('active', False)
-        list_mode = self.list_filter_state.get('mode', 'in')
-        target_lists = self.list_filter_state.get('lists', set())
-
-        # Use cached IDs if available, or empty set (will be populated on first activation via update_cache)
-        target_sys_ids = self.list_filter_state.get('cached_ids', set())
-
-        # Domain exclusion state
-        has_domain_exclusions = bool(self._domain_exclusions) and self._has_result_domains
-        hide_uncategorized = "Uncategorized" in self._domain_exclusions if has_domain_exclusions else False
-
-        # D20: rows the post-search criteria keep, once computed for these results.
-        _post_ids = getattr(self, '_post_criteria_ids', None)
-        _has_meas_post = (bool(getattr(self, '_post_criteria', None)) and _post_ids is not None
-                          and getattr(self, '_measurement_fetch_complete', False))
-        # Phase 95 REQ-6 — LOCAL filter cascade joinpoint (search surface).
-        _local_state_search = getattr(self, '_local_filter_state_search', 'all')
-        _results_for_local = getattr(self, 'last_results', []) or []
-        _local_filtered = self._apply_local_filter(_results_for_local, _local_state_search)
-        # Phase 96 D-F1: drop user-opted-out LOCAL files from the cascade.
-        _local_filtered = self._apply_local_optout_filter(_local_filtered)
-        _local_filter_active = _local_state_search != 'all'
-        # Phase 96 D-F1: visible-set must also be computed if opt-outs may have hidden hits.
-        _optout_active = bool(getattr(self, '_local_file_optouts', set()))
-        _local_visible_sys_ids = {
-            (r.get('display', {}) or {}).get('id') for r in _local_filtered
-        } if (_local_filter_active or _optout_active) and not self._local_filter_inactive_chip_visible else None
-        self._show_local_filter_chip('search', self._local_filter_inactive_chip_visible)
-
-        no_filters = (not self.results_filters and not list_active and not has_domain_exclusions
-                      and self._printed_filter_state == 'all' and not _has_meas_post
-                      and not _local_filter_active and not _optout_active)
-
-        changed = False
-        excluded_rows = 0
-
-        def _set_hidden(row, hidden):
-            nonlocal changed
-            if self.results_table.isRowHidden(row) != hidden:
-                self.results_table.setRowHidden(row, hidden)
-                changed = True
-
-        for row in range(self.results_table.rowCount()):
-            # Exclusions first, with or without a filter: they are not a
-            # filter the user clears, they hold until New.
-            if self._row_is_excluded(row):
-                excluded_rows += 1
-                _set_hidden(row, True)
-                continue
-            if no_filters:
-                _set_hidden(row, False)
-                continue
-
-            visible = True
-
-            # A. Check Column Filters
-            for column, rule in self.results_filters.items():
-                cell_text = self._results_filter_text_for_row(row, column)
-                if not self._text_matches_filter(cell_text, rule):
-                    visible = False
-                    break
-
-            if not visible:
-                _set_hidden(row, True)
-                continue
-
-            # B. Check List Filter
-            if list_active:
-                # Get SysID from column 2
-                item = self.results_table.item(row, 2)
-                sys_id = item.text().strip() if item else ""
-
-                in_list = sys_id in target_sys_ids
-
-                if list_mode == 'in':
-                    if not in_list: visible = False
-                elif list_mode == 'not_in':
-                    if in_list: visible = False
-
-            # C. Check Domain Exclusions
-            if visible and has_domain_exclusions:
-                item = self.results_table.item(row, self.COL_SYS_ID)
-                sys_id = item.text().strip() if item else None
-                result_domains = self._result_domain_map.get(sys_id, []) if sys_id else []
-                if not result_domains:
-                    if hide_uncategorized:
-                        visible = False
-                elif all(d in self._domain_exclusions for d in result_domains):
-                    visible = False
-
-            # D. Check Printed Filter
-            if visible and self._printed_filter_state != 'all':
-                item = self.results_table.item(row, self.COL_SYS_ID)
-                sys_id = item.text().strip() if item else None
-                is_printed = sys_id in self._printed_sys_ids if self._printed_sys_ids and sys_id else False
-                if self._printed_filter_state == 'hide_printed' and is_printed:
-                    visible = False
-                elif self._printed_filter_state == 'only_printed' and not is_printed:
-                    visible = False
-
-            # E. Post-search criteria (Phase 54, D20; separate from pre_search_filters).
-            # Until they are computed for this run's rows the row shows (review concern #8).
-            if visible and _has_meas_post:
-                item = self.results_table.item(row, self.COL_SYS_ID)
-                if (item.text().strip() if item else None) not in _post_ids:
-                    visible = False
-
-            # F. Phase 95 REQ-6 — LOCAL filter (applied after printed filter per cascade discipline).
-            if visible and _local_visible_sys_ids is not None:
-                item = self.results_table.item(row, self.COL_SYS_ID)
-                row_sys_id = item.text().strip() if item else None
-                if row_sys_id not in _local_visible_sys_ids:
-                    visible = False
-
-            _set_hidden(row, not visible)
-
-        # Rewrite the status whenever the visible set changed -- including
-        # the last filter or exclusion being removed, which leaves no filter
-        # active but a line that still counts the rows it hid.
+        table = self.results_table
+        previous = getattr(self, '_result_view', None)
+        previous_count = (previous.count, len(previous.pending)) if previous is not None else None
         previous_excluded = getattr(self, '_search_rows_excluded', 0)
-        self._search_rows_excluded = excluded_rows
-        if (changed or excluded_rows != previous_excluded) and self.results_table.rowCount():
+        view = self._rebuild_result_view(self._result_rules())
+        self._fetch_pending_metadata(view)
+        self._search_rows_excluded = view.excluded
+        changed = (view.count, len(view.pending)) != previous_count   # the line counts both
+        drawn = set()
+        for row in range(table.rowCount()):
+            item = table.item(row, self.COL_SYS_ID)
+            position = item.data(self.RESULT_POSITION_ROLE) if item is not None else None
+            if position is None:
+                continue
+            drawn.add(position)
+            hidden = not view.shows_position(position)
+            if table.isRowHidden(row) != hidden:
+                table.setRowHidden(row, hidden)
+                changed = True
+        loaded = getattr(self, 'results_loaded', 0)
+        if any(shown and i not in drawn for i, shown in enumerate(view.shown[:loaded])):
+            self._rerender_results()
+            changed = True
+        elif view.remaining_after(loaded) and self._first_shown_result_row() is None:
+            self.load_next_batch()       # every loaded row is hidden now: show the next kept ones
+        if (changed or view.excluded != previous_excluded) and table.rowCount():
             self.status_label.setText(self._search_status_summary())
         self._update_load_more_button()
-        return excluded_rows
+        return view.excluded
 
     def _result_page_num(self, res):
         """The 1-based page a results row is showing, or None.
@@ -28215,8 +28184,10 @@ class GenizahGUI(QMainWindow):
             # (it clears the rows), are not carried.
             asked = set(ids)
             shown = getattr(self, 'shelfmark_items_by_sid', None) or {}
+            pending = self._pending_fetches().asked         # a filter waits for these too
             carried = [sid for sid in getattr(self.meta_loader, 'sids', None) or []
-                       if sid in shown and sid not in self.meta_mgr.nli_cache and sid not in asked]
+                       if (sid in shown or sid in pending) and sid not in self.meta_mgr.nli_cache
+                       and sid not in asked]
             ids = carried + list(ids)
             # Its finished(True) is still queued: delivered after the new loader
             # starts, on_meta_finished dropped the NEW loader's reference (a running
@@ -28249,6 +28220,9 @@ class GenizahGUI(QMainWindow):
                 self.title_items_by_sid[sid].setToolTip(title)
                 res['display']['title'] = display_title
 
+        texts = self._result_texts()
+        for sid in ids:
+            texts.forget(sid)
         self._apply_results_table_filters()
 
         if self.meta_to_fetch_count == 0:
@@ -28301,11 +28275,22 @@ class GenizahGUI(QMainWindow):
             r['display']['shelfmark'] = shelf
             r['display']['title'] = title
 
-        self._apply_results_table_filters()
+        # Its shelfmark and title are known now: the filters decide on them, once for
+        # the whole burst of arrivals (one full pass per manuscript before, GS-9).
+        self._result_texts().forget(sid)
+        self._schedule_results_refilter()
 
     def on_meta_finished(self, cancelled):
         total_loaded = self.meta_cached_count + self.meta_progress_current
         total_expected = self.meta_cached_count + self.meta_to_fetch_count
+        # Found or not, a fetch that ended decides the filter: nothing waits for ever.
+        ended = set() if cancelled else set(getattr(self.meta_loader, 'sids', None) or ())
+        self._pending_fetches().done.update(ended)
+        self._result_texts().forget(*ended)
+        timer = self.__dict__.get('_refilter_timer')
+        if timer is not None:
+            timer.stop()                         # the last arrivals' pass, before the line below
+        self._apply_results_table_filters()
         # These replace the results summary once metadata completes, so keep
         # it when rows are hidden.
         if cancelled:
@@ -28317,6 +28302,8 @@ class GenizahGUI(QMainWindow):
         # finished(bool) is emitted inside run(): the QThread is still running.
         _keep_until_finished(self.meta_loader)
         self.meta_loader = None
+        if self._pending_fetches().waiting:          # queued while it ran (Codex round 3 on #150)
+            self._fetch_pending_metadata(self._current_result_view())
 
     def _format_metadata_status(self):
         total_expected = self.meta_cached_count + self.meta_to_fetch_count
@@ -28538,6 +28525,28 @@ class GenizahGUI(QMainWindow):
                     w.set_buttons_visible(False)
                 self._catalog_hovered_row = -1
         return super().eventFilter(source, event)
+
+    def _results_to_export(self):
+        """(results, ticked) Export writes: the ticked results if any are ticked, else every kept
+        result, loaded or not (GS-9): the loaded in the table's order, then the rest in order."""
+        table = self.results_table
+        view = self._current_result_view()
+        ticked, shown, any_ticked = [], [], False
+        for row in range(table.rowCount()):
+            if table.isRowHidden(row):
+                continue
+            box, item = table.item(row, self.COL_CHECKBOX), table.item(row, self.COL_SYS_ID)
+            res = box.data(Qt.ItemDataRole.UserRole) if box is not None else None
+            if res:
+                any_ticked |= (is_ticked := box.checkState() == Qt.CheckState.Checked)
+                if item is not None and view.is_pending(item.data(self.RESULT_POSITION_ROLE)):
+                    continue                 # still loading: not known to match yet, ticked or not
+                shown.append(res)
+                if is_ticked:
+                    ticked.append(res)
+        if any_ticked:                       # a selection, even of rows still loading only
+            return ticked, True
+        return shown + view.shown_after(getattr(self, 'results_loaded', 0)), False
 
     def _collect_sorted_results(self):
         sorted_results = []
@@ -29851,7 +29860,7 @@ class GenizahGUI(QMainWindow):
 
         # D-03: emit export dialog open BEFORE the save dialog (no no-data guard here — MEDIUM-8)
         self._emit_feature_opened(dialog_name='export')
-        if not self._collect_sorted_results():
+        if not self._results_to_export()[0]:
             _show_ok_notice(self, 'information', tr("Export Results"), tr(
                 "Nothing to export: every result in the table is hidden by a filter or an exclusion."))
             return
@@ -29864,30 +29873,7 @@ class GenizahGUI(QMainWindow):
         headers = [tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
         data_rows = []
 
-        # Collect results to export (Selected or All)
-        results_to_export = []
-
-        # Check if any are selected in the table
-        has_selection = False
-        selected_rows_data = []
-
-        # Iterate visible table rows to respect user selection and exclusion state
-        rows = self.results_table.rowCount()
-        for i in range(rows):
-            if self.results_table.isRowHidden(i):
-                continue
-            chk_item = self.results_table.item(i, self.COL_CHECKBOX)
-            if chk_item and chk_item.checkState() == Qt.CheckState.Checked:
-                has_selection = True
-                res = chk_item.data(Qt.ItemDataRole.UserRole)
-                if res:
-                    selected_rows_data.append(res)
-
-        if has_selection:
-            results_to_export = selected_rows_data
-        else:
-            # Fallback to visible results (excludes hidden/excluded rows)
-            results_to_export = self._collect_sorted_results()
+        results_to_export, has_selection = self._results_to_export()
 
         # Phase 103: prime the batch filepath cache for any LOCAL hits in the
         # export set (BUG-6 pattern — ONE SQLite query, never per-row).
