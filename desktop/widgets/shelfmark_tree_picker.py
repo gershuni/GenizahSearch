@@ -2895,7 +2895,11 @@ class _DetailsPane(QFrame):
 
     def _prefetch(self, page: int) -> None:
         """The image after the one shown, fetched before it is asked for (one at a time: a step asked
-        meanwhile replaces it while it waits)."""
+        meanwhile replaces it while it waits). Not the thumbnail's page while the thumbnail is still on
+        its way: that picture is being fetched already (a step to it asks for it if it never comes)."""
+        if (page == self._thumb_page and self.leaf is not None
+                and not self.dialog.known_thumb(self.leaf.sys_id)[0]):
+            return
         if 0 <= page < len(self.pages) and page != self.page and self._page_image(page) is None:
             self._ask_page(page)
 
