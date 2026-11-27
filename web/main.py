@@ -1102,17 +1102,9 @@ def page_meta(
 <link rel="canonical" href="{url}">
 '''
 
-# Google Analytics
-ANALYTICS_SCRIPT = '''
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-LXT1PTKG3E"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-LXT1PTKG3E');
-</script>
-'''
+# Google Analytics; both tags skip automated browsers (web/analytics_bot_filter.py)
+from web.analytics_bot_filter import AUTOMATED_JS as _AUTOMATED_JS, ga_head_html as _ga_head_html  # noqa: E402
+ANALYTICS_SCRIPT = _ga_head_html()
 
 # PostHog Analytics (real-user monitoring + session recordings)
 _posthog_key = os.environ.get('POSTHOG_API_KEY', '')
@@ -1122,11 +1114,14 @@ _POSTHOG_SCRUB_JS = open(os.path.join(os.path.dirname(__file__), 'static', 'js',
                          encoding='utf-8').read()
 POSTHOG_SCRIPT = f'''
 <!-- PostHog Analytics -->
-<script>{_POSTHOG_SCRUB_JS}</script>
+{_AUTOMATED_JS}<script>{_POSTHOG_SCRUB_JS}</script>
 <script>
     !function(t,e){{var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){{function g(t,e){{var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){{t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){{var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e}},u.people.toString=function(){{return u.toString(1)+".people (stub)"}},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url lib get_property getSessionProperty sessionRecording startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_config __request_queue".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])}},e.__SV=1)}}(document,window.posthog||[]);
+    // Automated browser: no posthog at all, so every `if (window.posthog)` caller skips cleanly.
+    if (window.__ghAutomated) {{ window.posthog = undefined; }}
     // Defer PostHog init past first paint (events are queued by the stub loader above)
     function _phInit() {{
+        if (window.__ghAutomated) return;  // window.posthog was cleared above: never init
         posthog.init('{_posthog_key}', {{
             api_host: 'https://eu.i.posthog.com',
             person_profiles: 'identified_only',

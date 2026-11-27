@@ -1395,6 +1395,12 @@ How the web Fragment Puzzle saves (2026-10-20). Checked in a real browser by `sc
 - **Function** `_restore_tab_canvas` — reopens the tab's draft from its saved copy, else rebuilds the tab's canvas (positions and crops); skipped for `?doc=` unless that cannot be opened
 - **Function** `save_state` — every `STATE_SAVE_INTERVAL_S` and at the end of a load: positions and `getCropState()` into the tab
 
+## web/analytics_bot_filter.py
+
+Keeps automated browsers (`navigator.webdriver`, crawler user agents) out of Google Analytics and PostHog; the page itself is served to them unchanged (2026-11-27).
+- **Constant** `AUTOMATED_JS` — sets `window.__ghAutomated` once per page; in both tags' head HTML; PostHog's `_phInit` in `web/main.py` returns early on it
+- **Function** `ga_head_html` — the Google tag (`GA_MEASUREMENT_ID`), loaded only when not automated; is `ANALYTICS_SCRIPT`
+
 ## web/ux_timing.py
 
 User-perceived latency, measured in the browser (PostHog `ux_timing`, 2026-10-20). Browser side: `web/static/js/ux_timing.js`; env: `UX_TIMING_ENABLED`, `UX_TIMING_SAMPLE_RATE`. Event v2 (2026-11-22): `img_final` / `img_full_ms` / `img_source`, the image the reader ends up seeing (`sharpState` follows the selector across redraws).
