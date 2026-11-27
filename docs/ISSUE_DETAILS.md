@@ -171,6 +171,12 @@ Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
 
 *Triage 2026-10-25:* still open. genizah_app.py:23557-23563 stop_search does search_thread.wait(5000) on the UI thread and then QThread.terminate(); the same terminate pattern is still at 23646 and 36355.
 
+*2026-11-26, PR #147 (65d2e8b):* the Search worker is fixed. Stop, New, a new search and Close no
+longer wait for it or terminate it (`desktop/search_run.py`), and Stop still delivers partial results.
+Still open: `_reset_composition` waits on and terminates `comp_thread` and `group_thread`, and
+`closeEvent` does the same for those and for the other workers it settles. `_drain_previous_worker`
+(Composition) and `_browse_exit_reading_desk` still wait on the UI thread.
+
 ## GS-15
 
 **`btn_comp_run` renames itself after the first run** · P2 · Desktop app · ❌ Open · opened 2026-08-19

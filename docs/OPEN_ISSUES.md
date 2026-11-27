@@ -65,7 +65,7 @@ _None open._
 | [GS-9](ISSUE_DETAILS.md#gs-9) | Desktop Search export, filters and counts see only the loaded rows | `genizah_app.py::export_results`, _collect_sorted_results, load_next_batch | 2026-09-25 | ❌ Open |
 | [GS-10](ISSUE_DETAILS.md#gs-10) | The `*` search-hit marker is in-band, so a literal asterisk in source text is still ambiguous | `desktop/widgets/__init__.py::mark_pattern_hits`, `desktop/result_dialog.py::_htmlify` | 2026-09-03 | ❌ Open |
 | [GS-12](ISSUE_DETAILS.md#gs-12) | Desktop Lab Mode composition silently ignores Focus Search | `genizah_app.py::run_composition` (Lab branch), `desktop/gui_threads.py::LabCompositionThread` | 2026-09-03 | ❌ Open |
-| [GS-14](ISSUE_DETAILS.md#gs-14) | Stop blocks the UI thread and can still hard-kill a worker | `genizah_app.py::stop_search` (+5 sibling stop paths) | 2026-08-19 | ❌ Open |
+| [GS-14](ISSUE_DETAILS.md#gs-14) | Stop blocks the UI thread and can still hard-kill a worker (Search fixed; Composition and grouping remain) | `genizah_app.py::_reset_composition`, `closeEvent` | 2026-08-19 | ❌ Open |
 | [GS-15](ISSUE_DETAILS.md#gs-15) | `btn_comp_run` renames itself after the first run | `genizah_app.py:5399` vs `:21532`, `:22373` | 2026-08-19 | ❌ Open |
 | [GS-16](ISSUE_DETAILS.md#gs-16) | A disabled button with an inline `background-color` does not look disabled | `genizah_app.py:4598-4599` (`btn_search`), repo-wide pattern | 2026-08-19 | ❌ Open |
 | [GS-17](ISSUE_DETAILS.md#gs-17) | Desktop Browse tab: three toolbars reported dark in bright mode; the named cause is no longer found in the source | `genizah_app.py` (Browse-tab toolbar construction) | 2026-05-18 | ⏳ Needs a check |
