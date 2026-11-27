@@ -41,7 +41,10 @@ def _box(user):
 
 
 def _mode_list(user):
-    return next(e for e in _elements(user, ui.select) if 'responsa' in (e.options or {}))
+    # Two of the Mode list's own keys: with PGP data on the machine, the PGP tag list comes first
+    # and has a 'responsa' tag of its own.
+    return next(e for e in _elements(user, ui.select)
+                if {'responsa', 'Regex'} <= set(e.options or {}))
 
 
 def _fire(user, element, event_type, value):
