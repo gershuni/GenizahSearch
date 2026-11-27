@@ -141,27 +141,6 @@ Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
 
 *Triage 2026-10-25:* still open. desktop/gui_threads.py:1213-1216 LabCompositionThread.__init__ has no restrict_sys_ids parameter; the Lab branch of run_composition (genizah_app.py:30523-30543) passes none; btn_comp_pre_search_filters (genizah_app.py:6721-6731) is never disabled for Lab Mode.
 
-## GS-14
-
-**Stop blocks the UI thread and can still hard-kill a worker** · P2 · Desktop app · ❌ Open · opened 2026-08-19
-
-Where: `genizah_app.py::stop_search` (+5 sibling stop paths)
-
-Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
-
-- **Issue:** **Stop blocks the UI thread and can still hard-kill a worker**
-- **File:** `genizah_app.py::stop_search` (+5 sibling stop paths)
-- **Status:** ❌ Open (found 2026-08-19, during the Pause/Resume work)
-- **Notes:** `stop_search` waits 5 s on the UI thread, then `QThread.terminate()`s a worker that may hold a Tantivy searcher or a SQLite handle (one between checkpoints; a paused worker is never in that state). A non-blocking Stop needs discard-vs-partial intent, per-operation terminal ownership, and an `event.ignore()`-then-drain `closeEvent`. Full text archived 2026-10-19.
-
-*Triage 2026-10-25:* still open. genizah_app.py:23557-23563 stop_search does search_thread.wait(5000) on the UI thread and then QThread.terminate(); the same terminate pattern is still at 23646 and 36355.
-
-*2026-11-26, PR #147 (65d2e8b):* the Search worker is fixed. Stop, New, a new search and Close no
-longer wait for it or terminate it (`desktop/search_run.py`), and Stop still delivers partial results.
-Still open: `_reset_composition` waits on and terminates `comp_thread` and `group_thread`, and
-`closeEvent` does the same for those and for the other workers it settles. `_drain_previous_worker`
-(Composition) and `_browse_exit_reading_desk` still wait on the UI thread.
-
 ## GS-15
 
 **`btn_comp_run` renames itself after the first run** · P2 · Desktop app · ❌ Open · opened 2026-08-19

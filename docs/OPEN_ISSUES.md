@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-11-27 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-11-27-desktop-search-loaded-rows-leftovers.md). 189 open: P1 0, P2 38, P3 151.
+> **Last Updated:** 2026-11-27 (archived GS-14). 188 open: P1 0, P2 37, P3 151.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -24,7 +24,7 @@ the private repository; grep only).
 |------|------|------|------|------|
 | Search | 0 | 4 | 22 | 26 |
 | Browse and viewer | 0 | 3 | 6 | 9 |
-| Desktop app | 0 | 6 | 34 | 40 |
+| Desktop app | 0 | 5 | 34 | 39 |
 | Website | 0 | 5 | 29 | 34 |
 | API and AI | 0 | 2 | 2 | 4 |
 | Discovery | 0 | 2 | 11 | 13 |
@@ -33,7 +33,7 @@ the private repository; grep only).
 | Build, CI and tests | 0 | 0 | 5 | 5 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 3 | 1 | 4 |
-| **Total** | **0** | **38** | **151** | **189** |
+| **Total** | **0** | **37** | **151** | **188** |
 
 ## P1 - Critical
 
@@ -64,7 +64,6 @@ _None open._
 |----|-------|-------|--------|--------|
 | [GS-10](ISSUE_DETAILS.md#gs-10) | The `*` search-hit marker is in-band, so a literal asterisk in source text is still ambiguous | `desktop/widgets/__init__.py::mark_pattern_hits`, `desktop/result_dialog.py::_htmlify` | 2026-09-03 | ❌ Open |
 | [GS-12](ISSUE_DETAILS.md#gs-12) | Desktop Lab Mode composition silently ignores Focus Search | `genizah_app.py::run_composition` (Lab branch), `desktop/gui_threads.py::LabCompositionThread` | 2026-09-03 | ❌ Open |
-| [GS-14](ISSUE_DETAILS.md#gs-14) | Stop blocks the UI thread and can still hard-kill a worker (Search fixed; Composition and grouping remain) | `genizah_app.py::_reset_composition`, `closeEvent` | 2026-08-19 | ❌ Open |
 | [GS-15](ISSUE_DETAILS.md#gs-15) | `btn_comp_run` renames itself after the first run | `genizah_app.py:5399` vs `:21532`, `:22373` | 2026-08-19 | ❌ Open |
 | [GS-16](ISSUE_DETAILS.md#gs-16) | A disabled button with an inline `background-color` does not look disabled | `genizah_app.py:4598-4599` (`btn_search`), repo-wide pattern | 2026-08-19 | ❌ Open |
 | [GS-17](ISSUE_DETAILS.md#gs-17) | Desktop Browse tab: three toolbars reported dark in bright mode; the named cause is no longer found in the source | `genizah_app.py` (Browse-tab toolbar construction) | 2026-05-18 | ⏳ Needs a check |
