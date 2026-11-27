@@ -146,8 +146,6 @@ class _Win:
     _comp_witness_state = APP._comp_witness_state
     _witness_dialog_is_open = APP._witness_dialog_is_open
     _reset_composition = APP._reset_composition
-    _retry_pending_reset = APP._retry_pending_reset
-    _reset_is_pending = APP._reset_is_pending
     _refuse_stop_during_passage_scan = APP._refuse_stop_during_passage_scan
     # Borrowed, not stubbed: Reset clears the auto-expand state before it
     # defers, and a stand-in would let that call vanish silently.
@@ -604,11 +602,13 @@ def test_this_feature_never_terminates_a_thread():
 
 
 def test_the_stop_paths_all_route_through_the_one_guard():
-    for name in ('toggle_composition', 'cancel_composition',
-                 '_reset_composition'):
+    for name in ('toggle_composition', 'cancel_composition'):
         seg = _function_source(name)
         assert '_refuse_stop_during_passage_scan()' in seg, (
             name, 'does not consult the passage stop guard')
+    # New is not a Stop (GS-14, PR 5, owner D7): it clears the tab at once and the scan
+    # ends in the background, held; tests/test_new_keeps_session_file.py has the behaviour.
+    assert '_refuse_stop_during_passage_scan()' not in _function_source('_reset_composition')
 
 
 def test_the_release_seam_forwards_the_generation():
@@ -2185,108 +2185,6 @@ def test_a_chunk_search_is_untouched_by_any_of_this():
     w._comp_grouping_active = False
     assert APP._refuse_stop_during_passage_scan(w) is False
     assert APP._passage_batch_in_flight(w) is False
-
-
-def test_reset_never_terminates_a_witness_batch(monkeypatch):
-    """THE guard. Reset's own path is request_cancel + wait(3000) +
-    terminate(), and terminate on a thread holding live memory mappings is an
-    access violation, not a catchable error. Being stoppable does not make a
-    batch killable."""
-    w = _batch_window(monkeypatch)
-    w._auto_expand_left = 3
-    scheduled = []
-    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
-                        staticmethod(lambda ms, fn: scheduled.append((ms, fn))))
-    APP._reset_composition(w)
-    # Cleared BEFORE the deferral, or the cancelled batch's partial
-    # completion renders, arms the expansion and schedules the next round at
-    # zero delay -- which beats the 400 ms retry, so New spends a whole
-    # witness-search cancelling a round it just spawned, once per round.
-    assert w._auto_expand_left == 0, (
-        'Reset deferred without clearing the expansion it is racing'
-    )
-    assert w.comp_thread.terminated == 0, 'Reset terminated a passage batch'
-    assert w.comp_thread.waited == [], 'Reset blocked the UI thread'
-    assert w.comp_thread.cancelled == 1, 'Reset did not ask it to stop'
-    assert scheduled, 'Reset neither completed nor scheduled a retry'
-
-
-def test_reset_of_a_batch_defers_rather_than_clearing_the_results(monkeypatch):
-    """Clearing while the worker is still writing rows is how a half-reset
-    tab ends up showing the next search's rows under the old title."""
-    w = _batch_window(monkeypatch)
-    w.comp_tree = _Tree()
-    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
-                        staticmethod(lambda ms, fn: None))
-    APP._reset_composition(w)
-    assert w.comp_tree.cleared == 0, 'results were cleared mid-batch'
-    assert APP._reset_is_pending(w)
-
-
-def test_the_deferred_reset_retries_while_the_batch_is_still_running(monkeypatch):
-    """It must RESCHEDULE and do nothing else.
-
-    Asserting only that a 400 ms timer was armed is not enough, and a
-    mutation proved it: with the busy check removed the retry falls straight
-    through into `_reset_composition`, which arms a 400 ms timer of its OWN.
-    The observable the test was watching looked identical while the reset had
-    in fact run against a live batch. So the assertion is that the reset was
-    NOT performed.
-    """
-    w = _batch_window(monkeypatch, running=True)
-    scheduled, reset_calls = [], []
-    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
-                        staticmethod(lambda ms, fn: scheduled.append((ms, fn))))
-    APP._reset_composition(w)          # New, mid-batch: arms the retry
-    [(_ms, retry)] = scheduled
-    scheduled.clear()
-    # The INSTANCE, not APP: `_Win` copied the unbound method onto its own
-    # class, so patching APP would not be seen through the stub.
-    w._reset_composition = lambda: reset_calls.append(1)
-    retry()
-    assert reset_calls == [], 'the reset ran while the batch was still going'
-    assert APP._reset_is_pending(w), 'it forgot it was still waiting'
-    assert [ms for ms, _fn in scheduled] == [400], 'the retry gave up while the batch ran'
-
-
-def test_the_deferred_reset_completes_once_the_batch_is_done(monkeypatch):
-    """And the poll is a timer, never a blocking wait(): the UI thread is
-    where the batch's own signals are delivered, so blocking here would stop
-    the thread it is waiting for from ever reporting done."""
-    w = _batch_window(monkeypatch)
-    scheduled, done = [], []
-    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
-                        staticmethod(lambda ms, fn: scheduled.append(fn)))
-    APP._reset_composition(w)          # New, mid-batch: arms the retry
-    [retry] = scheduled
-    w.comp_thread._running = False     # the batch has finished
-    w._reset_composition = lambda: done.append(1)
-    retry()
-    assert done == [1], done
-    assert len(scheduled) == 1, 'it rescheduled after the batch had ended'
-    assert w._reset_pending is None
-
-
-def test_neither_deferred_reset_helper_ever_terminates():
-    """Source guard beside the existing one, which named only the close and
-    build helpers. Matched by statement, not substring: an earlier guard of
-    this kind matched its own explanatory COMMENT and passed against code
-    that was already wrong."""
-    import re
-    for name in ('_retry_pending_reset',):
-        seg = _function_source(name)
-        assert not re.search(r'^\s*\S*\.terminate\(\)', seg, re.M), (
-            name, 'calls terminate()')
-
-
-def test_reset_refuses_a_single_witness_scan_before_reaching_terminate():
-    """The ordering that matters: the refusal is the FIRST statement, so a
-    single-witness passage scan never reaches the wait/terminate block."""
-    w = _single_window()
-    w.comp_thread = _FakeBatchThread()
-    APP._reset_composition(w)
-    assert w.comp_thread.terminated == 0
-    assert w.comp_thread.cancelled == 0, 'it got past the refusal'
 
 
 # ---------------------------------------------------------------------------

@@ -53,7 +53,7 @@ from shared.search_engine import PHASE_LOCAL_SEARCH, MAX_WORD_GAP, _validate_wor
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from desktop.startup_work import StartupWork, shelfmark_completer_rows
 from desktop.search_scope import COMPOSITION, SEARCH, TABS, scope_of, scope_property, tab_for_index
-from desktop.search_run import search_run_of
+from desktop.search_run import comp_run_of, search_run_of
 import desktop.result_view as rv
 from desktop.search_export import EXPORT_IN_BACKGROUND, ExportJob, ExportThread, export_order
 from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, CompoundCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
@@ -2305,7 +2305,6 @@ class GenizahGUI(QMainWindow):
         # Advanced by each tab's New; see _deliver_unless_discarded.
         self._search_new_generation = 0
         self._comp_new_generation = 0
-        self._reset_pending = None  # a New waiting on a witness; see _reset_is_pending
         self.last_browse_field = None
         self.current_browse_sid = None
         self.current_browse_p = None
@@ -11416,9 +11415,9 @@ class GenizahGUI(QMainWindow):
         self._browse_rd_fork_worker = None
         self._browse_rd_document = None
 
-        # Disconnect callbacks and then wait/terminate any pending enrichment
-        # threads so a stale re-render can't fire into a torn-down viewer and
-        # QThreads are never destroyed while still running.
+        # Disconnect callbacks so a stale re-render can't fire into a torn-down viewer,
+        # and hold each thread until it ends: never destroyed while running, never
+        # waited for or terminated (GS-14).
         threads_map = getattr(self, '_browse_rd_enrich_threads', None) or {}
         # Tolerate the legacy list shape from prior builds.
         threads_iter = threads_map.values() if isinstance(threads_map, dict) else threads_map
@@ -11427,11 +11426,7 @@ class GenizahGUI(QMainWindow):
                 t.finished_signal.disconnect()
             except (TypeError, RuntimeError):
                 pass
-            if t.isRunning():
-                if not t.wait(1500):
-                    logger.warning("Reading desk enrichment thread did not finish in 1.5s, terminating")
-                    t.terminate()
-                    t.wait()
+            _keep_until_finished(t)
         self._browse_rd_enrich_threads = {}
 
         # Restore normal view
@@ -15361,7 +15356,7 @@ class GenizahGUI(QMainWindow):
         preview_thread = getattr(self, 'lists_preview_img_thread', None)
         if preview_thread and preview_thread.isRunning():
             preview_thread.cancel()
-            preview_thread.wait(500)
+            _keep_until_finished(preview_thread)   # GS-14: not waited for
 
     def lists_clear_details(self):
         """Clear the details panel and preview."""
@@ -24787,35 +24782,27 @@ class GenizahGUI(QMainWindow):
         return lambda *args: self._deliver_unless_discarded(attr, generation, slot, *args)
 
     def _drain_previous_worker(self, attr, ctx):
-        """Refuse to rebind a worker slot while the old worker is still alive.
+        """Room for a new Composition run in ``attr``, never waiting (GS-14, PR 5).
 
-        run_composition rebinds self.comp_thread with no stop of the previous thread
-        (the Search tab no longer waits: _free_search_slot, GS-14). The Search<->Stop toggle normally
-        makes that window ~zero, but a PAUSED worker lives indefinitely, and
-        dropping the last reference to a live QThread is a hard crash
-        ("QThread: Destroyed while thread is still running").
-
-        Returns True when the slot is safe to rebind.
+        A previous worker still running (a paused one lives indefinitely) is discarded
+        and held until its thread ends (desktop/search_run.py::comp_run_of): dropping the
+        last reference to a live QThread is a hard crash. At most one stopped worker may
+        still be finishing; a third run is refused. True when the slot is safe to rebind.
         """
-        prev = getattr(self, attr, None)
-        if prev is None or not prev.isRunning():
-            return True
-        try:
-            prev.request_cancel()
-        except Exception:
-            logger.warning("request_cancel() failed on previous worker", exc_info=True)
-        prev.wait(2000)
-        if prev.isRunning():
-            # Do NOT rebind: two live workers would emit into the same window.
-            logger.warning("previous %s still running; refusing to start a new run", attr)
-            # Composition (its only caller) has no status label: its progress bar is the status surface.
-            self.comp_progress.setVisible(True)
-            self.comp_progress.setFormat(tr("Still stopping the previous search — try again in a moment."))
+        run, prev = comp_run_of(self), getattr(self, attr, None)
+        if not run.can_start(prev):
+            self._comp_still_stopping()
             return False
-        if ctx is not None:
-            self._apply_pause_state(ctx, 'hidden')
-            ctx.state = 'idle'
+        if run.discard(prev, tag='passage' if self._passage_scan_in_flight() else None):
+            self._comp_new_generation = getattr(self, '_comp_new_generation', 0) + 1   # its queue is dropped
+            if ctx is not None:
+                self._apply_pause_state(ctx, 'hidden')
+                ctx.state = 'idle'
         return True
+
+    def _comp_still_stopping(self):   # Composition's progress bar is its status line
+        self.comp_progress.setVisible(True)
+        self.comp_progress.setFormat(tr("Still stopping the previous search — try again in a moment."))
 
     def _free_search_slot(self):
         """Room for a new run in search_thread, never waiting (GS-14; desktop/search_run.py)."""
@@ -31791,15 +31778,6 @@ class GenizahGUI(QMainWindow):
 
     def toggle_composition(self):
         if self.is_comp_running:
-            # A New pressed during this batch is still waiting for the
-            # witness in flight, and has already discarded what the batch
-            # delivers, so Stop has no results to keep: it finishes the New
-            # -- at once if the witness is done, else when it is. Stopping
-            # the UI here instead left that New's retry armed, and it then
-            # cleared whatever search was started next.
-            if self._reset_is_pending():
-                self._reset_composition()
-                return
             # GUARDED STOP (Phase 146): a passage scan has no cancel hook,
             # so setting the flag would leave "Cancelling..." on screen for
             # up to ~19s and then complete anyway. Scoped to the scan phase
@@ -31815,15 +31793,10 @@ class GenizahGUI(QMainWindow):
             self._apply_pause_state(self._pause_comp, 'hidden')
             self._pause_comp.state = 'idle'
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
-                # Disconnect signals to prevent race conditions during stop
-                try: self.group_thread.finished_signal.disconnect()
-                except (RuntimeError, AttributeError): pass
-                try: self.group_thread.error_signal.disconnect()
-                except (RuntimeError, AttributeError): pass
-
-                self.group_thread.requestInterruption()
-                self.group_thread.wait()
-
+                # GS-14 (PR 5): its signals are cut and it ends in the background, held;
+                # the slot is cleared before the ungrouped results render (Codex F1).
+                comp_run_of(self).discard(self.group_thread)
+                self.group_thread = None
                 QMessageBox.information(self, tr("Stopped"), tr("Grouping stopped. Showing ungrouped results."))
                 # Pass explicit empty dicts for other arguments to avoid crashes
                 self.display_comp_results(self.comp_raw_items or [], {}, {}, self.comp_raw_filtered or [], {}, {})
@@ -31841,9 +31814,6 @@ class GenizahGUI(QMainWindow):
 
     def cancel_composition(self):
         """Cancel composition search gracefully (called by Escape shortcut)."""
-        if self._reset_is_pending():
-            self._reset_composition()  # as Stop does: see toggle_composition
-            return
         if self._refuse_stop_during_passage_scan():
             return
         # Escape is a Stop, and a Stop ends the expansion too.
@@ -31866,135 +31836,24 @@ class GenizahGUI(QMainWindow):
         self._refresh_witness_panel()
         self.comp_summary_text = ""  # Clear persistent summary on reset
 
-    def _reset_is_pending(self):
-        """True while a New pressed during the CURRENT composition run's
-        witness batch is waiting for the witness in flight.
-
-        `_reset_pending` is the request `_reset_composition` armed its retry
-        for: (the batch thread it cancelled, the New generation it started).
-        A request for any other thread belongs to a run that has since been
-        replaced, and counts as nothing.
-        """
-        pending = getattr(self, '_reset_pending', None)
-        return bool(pending) and pending[0] is getattr(self, 'comp_thread', None)
-
-    def _retry_pending_reset(self, request):
-        """Poll until the cancelled witness batch has actually finished, then
-        do the reset for real.
-
-        `QTimer.singleShot`, never a blocking `wait()`: the UI thread is what
-        the batch's own signals are delivered on, so blocking here would stop
-        the thread it is waiting for from ever reporting done.
-
-        It waits on the thread itself, not on `is_comp_running` alone: New
-        discarded the batch when it was pressed, so the completion that would
-        have cleared that flag is dropped on arrival.
-
-        `request` is the one this chain was armed for, and the chain acts only
-        while it is still the pending one and its batch still holds the thread
-        slot. A New pressed again after the witness finished, or a Stop,
-        completes the reset without waiting for this timer; a new run takes
-        the slot. A callback still in flight after either must not cancel and
-        clear the search started next -- a bare "pending" flag let it.
-        """
-        if request is None or getattr(self, '_reset_pending', None) is not request:
-            return  # the reset already happened, or a later New owns the retry
-        thread = getattr(self, 'comp_thread', None)
-        if thread is not request[0]:
-            # A new run started; the tab New meant to clear is gone.
-            self._reset_pending = None
-            return
-        if self._passage_batch_in_flight() and thread.isRunning():
-            QTimer.singleShot(400, partial(self._retry_pending_reset, request))
-            return
-        self._reset_pending = None
-        self._reset_composition()
-
     def _reset_composition(self):
         """Clear all composition search state and start fresh."""
-        # Reset's own path is request_cancel + wait(3000) + terminate(). A
-        # passage scan answers none of that: it would block the UI three
-        # seconds and then TERMINATE a thread mid-search, which is how a
-        # memory-mapped reader gets killed holding its mappings.
-        if self._refuse_stop_during_passage_scan():
-            return
-        # A multi-witness batch IS stoppable, but Reset's own path is
-        # request_cancel + wait(3000) + terminate() -- and terminating a
-        # thread that holds live memory mappings is exactly the failure the
-        # guard above prevents for a single search. Being stoppable does not
-        # make it killable: the witness in flight can still be seconds away
-        # (up to ~19s at Deepest), so Reset asks it to stop and comes back
-        # later, the same non-blocking retry `_defer_close_for_passage` uses.
-        # The thread is checked as well as the flag: once New has discarded
-        # the batch, its completion no longer clears `is_comp_running`.
-        thread = getattr(self, 'comp_thread', None)
-        if self._passage_batch_in_flight() and thread.isRunning():
-            # BEFORE the cancel, not in the deferred reset 400 ms later.
-            # The cancelled batch's partial completion renders first, arms
-            # the expansion and schedules the next round at ZERO delay --
-            # which in flat mode reliably beats the retry timer. New then
-            # cancels a round it just spawned, once per round, and takes a
-            # witness-search duration each time to clear.
-            self._stop_auto_expand('')
-            thread.request_cancel()
-            if not self._reset_is_pending():
-                # New discards the batch NOW, not when the retry resets the
-                # tab: what it delivers meanwhile -- its partial rows, which
-                # would render and start grouping, an error, a status line
-                # -- is dropped on arrival (_deliver_unless_discarded). That
-                # completion used to report the cancelled run's telemetry,
-                # so the report is made here.
-                self._comp_new_generation = getattr(self, '_comp_new_generation', 0) + 1
-                self._emit_comp_search_telemetry('cancelled')
-                # One retry chain per request: it reschedules itself until
-                # the batch ends. A second chain would run the reset twice,
-                # and the second could clear a search started after the
-                # first. The request names this batch, so a chain armed for
-                # an earlier run's batch stops at its next tick.
-                request = self._reset_pending = (thread, self._comp_new_generation)
-                QTimer.singleShot(400, partial(self._retry_pending_reset, request))
-            # Every time: the refusal helper above has just said the
-            # results found so far are kept, which is Stop's promise, not
-            # New's.
-            if hasattr(self, 'lbl_comp_status'):
-                self.lbl_comp_status.setText(tr(
-                    "Clearing once the current witness finishes."))
-            return
-        # From here the reset happens now. Whatever the composition or
-        # grouping run still has queued -- a cancelled scan's partial rows, a
-        # grouping result, an error -- is dropped on arrival
-        # (_deliver_unless_discarded).
-        # And a retry an earlier New armed finds its reset done: left
-        # pending, it would reset again once it fired, cancelling and
-        # clearing whatever search had been started by then.
-        self._reset_pending = None
+        # GS-14 (PR 5, owner D7): New never waits and never terminates. A running scan
+        # (a letter-level passage scan too, which cannot be stopped mid-search) or
+        # grouping is asked to stop, its signals are cut, and it ends in the background,
+        # held (desktop/search_run.py::comp_run_of); whatever it still delivers is dropped
+        # (_deliver_unless_discarded), so the tab clears at once. A held passage scan
+        # still holds a close back (_passage_workers_busy).
         self._comp_new_generation = getattr(self, '_comp_new_generation', 0) + 1
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'
-        # 1. Stop any running composition thread
-        if getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
-            self.comp_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
-            self.comp_thread.wait(3000)
-            if self.comp_thread.isRunning():
-                self.comp_thread.terminate()
-                self.comp_thread.wait()
-            # CR-114-03: emit the cancelled event for the run that was interrupted.
-            # The per-run emitted flag in _emit_comp_search_telemetry makes this
-            # exactly-once even if a cooperative on_comp_scan_finished also fires.
-            # Cancelled runs carry NO result_count_bucket (D-08).
+        run = comp_run_of(self)
+        if run.discard(getattr(self, 'comp_thread', None),
+                       tag='passage' if self._passage_scan_in_flight() else None):
+            # CR-114-03: the cancelled event for the run that was interrupted, exactly
+            # once (the per-run flag in _emit_comp_search_telemetry). No result bucket.
             self._emit_comp_search_telemetry('cancelled')
-
-        # 2. Stop any running grouping thread
-        if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
-            try: self.group_thread.finished_signal.disconnect()
-            except (RuntimeError, AttributeError): pass
-            try: self.group_thread.error_signal.disconnect()
-            except (RuntimeError, AttributeError): pass
-            self.group_thread.requestInterruption()
-            self.group_thread.wait(2000)
-            if self.group_thread.isRunning():
-                self.group_thread.terminate()
-                self.group_thread.wait()
+        run.discard(getattr(self, 'group_thread', None))
 
         # 3. Reset composition UI state
         self.reset_comp_ui()
@@ -32523,7 +32382,7 @@ class GenizahGUI(QMainWindow):
                 else:
                     self.comp_thread.finished_signal.connect(_comp_live(self.on_comp_search_finished))
 
-        self.comp_thread.progress_signal.connect(self.on_comp_progress)
+        self.comp_thread.progress_signal.connect(_comp_live(self.on_comp_progress))   # GS-14 F2
         if hasattr(self.comp_thread, 'pause_ack_signal'):
             self.comp_thread.pause_ack_signal.connect(
                 lambda rid, ep: self._on_pause_ack(self._pause_comp, rid, ep))
@@ -32896,6 +32755,15 @@ class GenizahGUI(QMainWindow):
         self.start_grouping(manuscripts, filtered_manuscripts)
 
     def start_grouping(self, items, filtered_items=None):
+        # GS-14 (PR 5, Codex F3): every caller (the scan's end, a display-mode change, a
+        # header click) admits through the tab's holder: at most one stopped worker still
+        # finishing. An older grouping still running is discarded and held, never dropped.
+        run, old = comp_run_of(self), getattr(self, 'group_thread', None)
+        if not run.can_start(old):
+            self.display_comp_results(items or [], {}, {}, filtered_items or [], {}, {})
+            self._comp_still_stopping()
+            return
+        run.discard(old)
         # Grouping runs on GroupingThread, which is deliberately outside the pause
         # design (it has its own interruption model and emits no terminal signal on
         # cancel). Hide the button rather than grey it out: a disabled Pause sitting
@@ -32929,9 +32797,9 @@ class GenizahGUI(QMainWindow):
         self.group_thread = GroupingThread(
             self.searcher, items, self.spin_filter.value(), filtered_items=filtered_items
         )
-        self.group_thread.progress_signal.connect(self.on_comp_progress)
-        # Dropped once New discards this run (_deliver_unless_discarded).
+        # Dropped once New discards this run (_deliver_unless_discarded), progress too.
         _comp_live = partial(self._discardable, '_comp_new_generation')
+        self.group_thread.progress_signal.connect(_comp_live(self.on_comp_progress))
         self.group_thread.status_signal.connect(
             _comp_live(lambda s: self.comp_progress.setFormat(s)))
         _grouping_run = getattr(self, '_comp_active_run_id', None)
@@ -33385,8 +33253,8 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_header.blockSignals(False)
         self._update_comp_export_label()
 
-        if getattr(self, 'group_thread', None):
-            self.group_thread.wait()
+        # It has emitted its result and is ending: held until its thread ends, not waited for.
+        _keep_until_finished(getattr(self, 'group_thread', None))
         self.group_thread = None
 
         self.comp_raw_items = main_res
@@ -36457,6 +36325,8 @@ class GenizahGUI(QMainWindow):
                 busy.append(name)
         if search_run_of(self).running(getattr(self, 'search_thread', None)) and 'search' not in busy:
             busy.append('search')         # a stopped search still finishing (GS-14)
+        if comp_run_of(self).running() and 'composition' not in busy:
+            busy.append('composition')    # a stopped scan or grouping still finishing (PR 5)
         # The "Did you mean" checks (words_occur), every one still running: a newer
         # zero-result search can start one before an older one ends (Codex on #479).
         if any(th.isRunning() for th in list(getattr(self, '_layout_suggestion_workers', ()))):
@@ -38550,7 +38420,8 @@ class GenizahGUI(QMainWindow):
             if th is not None and th.isRunning():
                 reasons.append(tr("the My Library letter-level index is busy"))
                 break
-        if self._passage_scan_in_flight():
+        # A passage scan New discarded is still running too, held (GS-14, PR 5).
+        if self._passage_scan_in_flight() or comp_run_of(self).running(tag='passage'):
             reasons.append(tr("a letter-level search is running"))
         return reasons
 
@@ -38889,19 +38760,11 @@ class GenizahGUI(QMainWindow):
 
             search_run_of(self).discard(getattr(self, 'search_thread', None))   # GS-14: no wait
 
-            if getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
-                self.comp_thread.requestInterruption()
-                self.comp_thread.wait(2000)
-                if self.comp_thread.isRunning():
-                    self.comp_thread.terminate()
-                    self.comp_thread.wait()
-
-            if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
-                self.group_thread.requestInterruption()
-                self.group_thread.wait(2000)
-                if self.group_thread.isRunning():
-                    self.group_thread.terminate()
-                    self.group_thread.wait()
+            # GS-14: no wait; Close drops what scan and grouping still deliver, as New does.
+            self._comp_new_generation = getattr(self, '_comp_new_generation', 0) + 1
+            comp_run = comp_run_of(self)
+            comp_run.discard(getattr(self, 'comp_thread', None))
+            comp_run.discard(getattr(self, 'group_thread', None))
 
             # Phase 100 D-07a: stop the shared PDF render worker cooperatively (no terminate()).
             try:
@@ -38919,10 +38782,7 @@ class GenizahGUI(QMainWindow):
             self.cancel_browse_image_thread()
             for t in getattr(self, '_browse_inflight', []):
                 t.cancel()
-                if not t.wait(2000):
-                    logger.warning("Browse image thread did not finish in 2s, terminating")
-                    t.terminate()
-                    t.wait()
+                _keep_until_finished(t)       # GS-14: no wait, no terminate
 
             # Stop reading desk enrichment threads so they don't outlive the
             # main window and trigger 'QThread destroyed while still running'.
@@ -38933,10 +38793,7 @@ class GenizahGUI(QMainWindow):
                     t.finished_signal.disconnect()
                 except (TypeError, RuntimeError):
                     pass
-                if t.isRunning() and not t.wait(1500):
-                    logger.warning("Reading desk enrichment thread did not finish in 1.5s, terminating")
-                    t.terminate()
-                    t.wait()
+                _keep_until_finished(t)       # GS-14: no wait, no terminate
         finally:
             super().closeEvent(event)
             if event.isAccepted() and getattr(self, '_exit_rebuild_hid_window', False):

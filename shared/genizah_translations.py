@@ -5563,8 +5563,6 @@ TRANSLATIONS.update({
     # than promising an instant stop and then taking twenty seconds.
     'Stopping after the current witness finishes. Results found so far are kept.':
         'העצירה תתבצע בסיום חיפוש העד הנוכחי. התוצאות שנמצאו עד כה נשמרות.',
-    'Clearing once the current witness finishes.':
-        'הניקוי יתבצע בסיום חיפוש העד הנוכחי.',
     # Loading witnesses from disk: the owner's witness sets are files,
     # not clipboard contents -- seventeen rites in one file, or a
     # transcription per file.

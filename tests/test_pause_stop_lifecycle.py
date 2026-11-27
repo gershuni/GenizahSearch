@@ -29,9 +29,13 @@ STOP_PATHS = [
 ]
 # Their search worker goes through SearchRun (request_cancel() is called there).
 SEARCH_STOP_PATHS = {'stop_search': 'stop', '_reset_search': 'discard', 'closeEvent': 'discard'}
+# New on the Composition tab goes through its own holder (GS-14, PR 5).
+COMP_STOP_PATHS = {'_reset_composition': 'run.discard(', 'closeEvent': 'comp_run.discard(',
+                   '_drain_previous_worker': 'run.discard(', 'start_grouping': 'run.discard('}
 
 
-@pytest.mark.parametrize('method', [m for m in STOP_PATHS if m not in SEARCH_STOP_PATHS])
+@pytest.mark.parametrize('method', [m for m in STOP_PATHS
+                                    if m not in SEARCH_STOP_PATHS and m not in COMP_STOP_PATHS])
 def test_stop_path_uses_request_cancel(method):
     src = inspect.getsource(getattr(app.GenizahGUI, method))
     assert 'request_cancel()' in src, (
@@ -49,6 +53,20 @@ def test_nothing_waits_on_or_terminates_the_search_worker():
     """GS-14: a search worker is never waited for on the UI thread nor terminated."""
     src = inspect.getsource(app)
     for bad in ('search_thread.wait(', 'search_thread.terminate('):
+        assert bad not in src, bad
+
+
+@pytest.mark.parametrize('method, call', sorted(COMP_STOP_PATHS.items()))
+def test_composition_stop_paths_go_through_its_holder(method, call):
+    src = inspect.getsource(getattr(app.GenizahGUI, method))
+    assert 'comp_run_of(self)' in src and call in src, method
+
+
+def test_nothing_waits_on_or_terminates_a_composition_or_grouping_worker():
+    """GS-14, PR 5: the scan and the grouping are never waited for on the UI thread nor
+    terminated, and nothing in the window terminates a thread."""
+    src = inspect.getsource(app)
+    for bad in ('comp_thread.wait(', 'group_thread.wait(', '.terminate()'):
         assert bad not in src, bad
 
 
@@ -92,12 +110,12 @@ def test_run_entry_points_refuse_to_rebind_a_live_worker(method, guard):
     assert guard in src, method
 
 
-def test_drain_refuses_rather_than_rebinding_on_timeout():
-    """If the old worker will not stop, starting anyway would leave two live
-    workers emitting into the same window."""
+def test_drain_refuses_rather_than_rebinding_a_third_run():
+    """Two stopped workers still finishing and a third run would pile workers on the
+    index: the drain refuses (GS-14, PR 5; behaviour in tests/test_comp_run.py)."""
     src = inspect.getsource(app.GenizahGUI._drain_previous_worker)
     assert 'return False' in src
-    assert 'isRunning()' in src
+    assert 'can_start(' in src
 
 
 @pytest.mark.parametrize('method', ['start_search', 'run_composition'])
@@ -120,6 +138,7 @@ def test_close_event_no_longer_relies_on_the_no_op_interruption():
     but closeEvent should be reaching it through the shared entry point: for the
     search worker that is SearchRun.discard (GS-14), which calls request_cancel()."""
     src = inspect.getsource(app.GenizahGUI.closeEvent)
-    assert 'search_run_of(self).discard(' in src
+    assert 'search_run_of(self).discard(' in src and 'comp_run.discard(' in src
     import desktop.search_run as search_run
-    assert 'request_cancel()' in inspect.getsource(search_run.SearchRun.discard)
+    assert '_ask_to_stop(current)' in inspect.getsource(search_run.SearchRun.discard)
+    assert 'request_cancel' in inspect.getsource(search_run._ask_to_stop)

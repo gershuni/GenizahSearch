@@ -2105,22 +2105,15 @@ def test_the_filtered_rows_are_recorded_wherever_the_main_rows_are():
 # running. The invariant: every path out either advances the round or clears it.
 
 
-def test_new_clears_the_expansion_before_it_defers():
-    """New during a batch requests a cancel and comes back in 400 ms. The
-    cancelled batch's partial completion renders FIRST, arms the expansion and
-    schedules the next round at zero delay -- which beats the retry timer. New
-    then cancels a round it just spawned, once per remaining round, taking a
-    whole witness-search each time to clear."""
+def test_new_drops_the_batch_before_it_can_arm_the_expansion():
+    """A cancelled batch's partial completion renders, arms the expansion and schedules
+    the next round at zero delay. New (GS-14, PR 5) clears the tab at once, so the New
+    generation moves FIRST: that completion is then dropped on arrival and arms nothing,
+    and the reset clears the expansion state itself."""
     src = _fn_src('_reset_composition')
-    defer = src.index('_passage_batch_in_flight')
-    tail = src[defer:]
-    assert '_stop_auto_expand' in tail, (
-        'New defers without clearing the expansion, so it races the round it '
-        'is trying to cancel'
-    )
-    assert tail.index('_stop_auto_expand') < tail.index('request_cancel'), (
-        'the expansion is cleared after the cancel, which is the race itself'
-    )
+    assert src.index('_comp_new_generation') < src.index('run.discard('), (
+        'the batch is cancelled before its completion is marked as dropped')
+    assert '_auto_expand_left = 0' in src and '_auto_expand_armed = False' in src
 
 
 def test_a_round_checks_the_method_before_it_promotes():

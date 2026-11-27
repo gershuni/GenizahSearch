@@ -1875,14 +1875,15 @@ Focus Search, one scope per tab (GS-13): the Search and Composition tabs each ha
 
 ## desktop/search_run.py
 
-The Search tab's search worker: Stop, New, a new search and Close never wait for it and never terminate it (GS-14, owner ruling "detach"). The worker stays in `GenizahGUI.search_thread`; this module holds the stopped ones until they end.
+The search workers of the Search and Composition tabs: Stop, New, a new run and Close never wait for them and never terminate them (GS-14, owner rulings "detach" and D7). The Search worker stays in `GenizahGUI.search_thread`, the Composition scan in `comp_thread` and its grouping in `group_thread`; this module holds the stopped ones until they end.
 
-- **Class** `SearchRun` — `stopping` (stopped workers still finishing).
-    - Method `stop(current)` — Stop: `request_cancel()`, held until it ends; its partial results still arrive.
-    - Method `discard(current)` — New, Close, a new search: also disconnects its result signals (`RESULT_SIGNALS`).
-    - Method `can_start(current)` — a new run may start while at most one older worker is still finishing (`GenizahGUI._free_search_slot`).
-    - Method `running(current)` — every worker still running (`GenizahGUI._index_readers_busy`).
-- **Function** `search_run_of(window)` — the window's SearchRun, made on first use.
+- **Class** `SearchRun(signals)` — `stopping` (stopped workers still finishing), `tags` (held workers with a tag).
+    - Method `stop(current)` — Stop: asked to stop (`request_cancel()`, or `requestInterruption()` for `GroupingThread`), held until it ends; its partial results still arrive.
+    - Method `discard(current, tag=None)` — New, Close, a new run: also disconnects `signals`; a worker already held is not stopped twice. `tag='passage'` marks a letter-level scan a close still waits for.
+    - Method `can_start(current)` — a new run may start while at most one older worker is still finishing (`GenizahGUI._free_search_slot`, `_drain_previous_worker`, `start_grouping`).
+    - Method `running(current=None, tag=None)` — every worker still running (`GenizahGUI._index_readers_busy`), or the held ones with `tag` (`_passage_workers_busy`).
+- **Function** `search_run_of(window)` — the Search tab's SearchRun (`RESULT_SIGNALS`), made on first use.
+- **Function** `comp_run_of(window)` — the Composition tab's (`COMP_SIGNALS`: progress, status, finished, error), made on first use.
 
 ## desktop/result_view.py
 
