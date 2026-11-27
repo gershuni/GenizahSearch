@@ -732,10 +732,11 @@ def test_exports_name_every_text_that_matched():
 def test_every_export_writer_gets_the_matched_texts():
     """The call sites: CSV / TXT / DOCX rows and the DOCX block name every text that matched,
     and the search information says which transcriptions were read."""
-    src = _function_source("export_results")
+    src = _function_source("_build_search_export")       # the builder export_results runs (GS-9)
     assert "str(d.get('img', '')), _export_source_label(r), snippet" in src
     assert "write_docx_result_block(doc, _export_row_with_sources(r)" in src
-    assert "search_info_lines.append(tr('Transcriptions') + f': {tr(_sources_names[_sources_run])}')" in src
+    assert "search_info_lines.append(tr('Transcriptions') + f': {job.transcriptions_label}')" in src
+    assert "transcriptions_label=tr(names[sources]) if sources in names else ''" in _function_source("_search_export_job")
 
 
 def test_the_xlsx_source_column_names_every_text_that_matched(monkeypatch):

@@ -138,7 +138,7 @@ def _search_export(w, monkeypatch, tmp_path, fmt):
     w._default_report_path = lambda q, name: str(out)
     _patch_dialogs(monkeypatch, out)
     shown = []
-    w._show_export_saved_dialog = lambda p: shown.append(p)
+    w._show_export_saved_dialog = lambda p, count=None: shown.append(p)
     w._save_last_folder = lambda p: None
     return w, out, shown
 
@@ -199,12 +199,12 @@ def _function(path, name):
                 if isinstance(n, ast.FunctionDef) and n.name == name)
 
 
-@pytest.mark.parametrize("path,name,writes", [(_APP, "export_results", 4),
+@pytest.mark.parametrize("path,name,writes", [(_APP, "_finish_search_export", 1),
                                               (_APP, "export_comp_report", 4),
                                               (_JOINS, "_export_xlsx", 1)])
 def test_no_export_writes_its_file_around_the_helper(path, name, writes):
-    """The nine save paths live in these three functions: four formats each
-    for the search and Composition Search, one for the Joins Lab. A direct
+    """The save paths live in these three functions: the search's one for its four formats
+    (built as bytes first, GS-9), four for Composition Search, one for the Joins Lab. A direct
     `open(path, 'w...')` or `.save(path)` would skip the question."""
     fn = _function(path, name)
     direct, through = [], 0

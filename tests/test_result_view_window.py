@@ -9,6 +9,7 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
 
+import desktop.result_view as rv
 import genizah_app as app
 from genizah_app import tr
 from tests.test_exclusion_surfaces import (_personal_state_in_tmp, _search, slot_errors,  # noqa: F401
@@ -170,6 +171,17 @@ def test_a_running_load_is_never_cancelled_to_fetch_the_pending_ones(window, mon
     assert asked == [[late]], "the pending result was not fetched once the load ended"
 
 
+def test_the_side_numbers_count_the_shown_rows_only(window):  # noqa: F811 (the imported fixture)
+    """The owner's 143 matches ended at "638": Qt numbered the hidden rows too."""
+    w = window
+    _search(w, _many(30))
+    w.results_filters = {w.COL_SNIPPET: {"text": "word* 1", "exclude": True}}   # 1 and 10-19 hidden
+    w._apply_results_table_filters()
+    t = w.results_table
+    labels = [t.verticalHeaderItem(r).text() for r in range(t.rowCount()) if not t.isRowHidden(r)]
+    assert labels == [str(n) for n in range(1, 20)], labels
+
+
 def test_a_burst_of_metadata_runs_one_pass(window, monkeypatch):  # noqa: F811 (the imported fixture)
     w = window
     _search(w, _many(5))
@@ -226,3 +238,19 @@ def test_all_terms_and_a_column_filter_together(window, monkeypatch):  # noqa: F
     w.results_filters = {w.COL_SNIPPET: {"text": "8/1"}}
     w._apply_results_table_filters()
     assert w.status_label.text().startswith(_showing(60, 600))   # 8, 18, ..., 598
+
+
+def test_the_side_numbers_follow_rows_a_sorted_column_moves(window):  # noqa: F811 (the imported fixture)
+    """Codex on #151: a value changing in the sorted column (Domain arriving) moves the
+    row without a click on the header; the numbers must still run 1, 2, 3 down the side."""
+    from PyQt6.QtWidgets import QApplication
+    w = window
+    _search(w, _many(6))
+    t = w.results_table
+    rv.renumber_on_moves(t)                                   # as create_search_tab wires it
+    t.sortItems(w.COL_SHELF)
+    QApplication.processEvents()
+    t.item(0, w.COL_SHELF).setText("zzz")                    # the first row moves to the end
+    QApplication.processEvents()
+    labels = [t.verticalHeaderItem(r).text() for r in range(t.rowCount())]
+    assert labels == [str(n) for n in range(1, 7)], labels

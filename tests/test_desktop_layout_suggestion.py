@@ -111,7 +111,8 @@ def test_every_running_check_is_an_index_reader():
     gate = threading.Event()
     w = _Window()
     w._index_readers_busy = GenizahGUI._index_readers_busy.__get__(w)
-    slow = _Searcher({"גבול"})
+    w._export_running = GenizahGUI._export_running.__get__(w)
+    slow =_Searcher({"גבול"})
     slow.words_occur = lambda q: gate.wait(5)                 # the first check blocks
     w.searcher = slow
     w._run_seq = 1

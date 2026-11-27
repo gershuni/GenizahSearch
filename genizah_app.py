@@ -55,6 +55,7 @@ from desktop.startup_work import StartupWork, shelfmark_completer_rows
 from desktop.search_scope import COMPOSITION, SEARCH, TABS, scope_of, scope_property, tab_for_index
 from desktop.search_run import search_run_of
 import desktop.result_view as rv
+from desktop.search_export import EXPORT_IN_BACKGROUND, ExportJob, ExportThread, export_order
 from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, CompoundCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
 from desktop.widgets import (
     text_has_pattern_markers,
@@ -1017,6 +1018,7 @@ def _build_search_results_xlsx_bytes(
     # (e.g., PGP tag rows from genizah_app.py:17065-17076). When None,
     # missing full_text renders as empty.
     full_text_fetcher=None,
+    row_step=lambda: None,  # GS-9: once per result row, LOCAL too: a background export's progress and Cancel
     # Smoke verification round 2 (2026-05-21):
     # Per-export search metadata for the new "Credits and Info" sheet.
     # All optional — omitted rows are simply skipped by the builder.
@@ -1189,6 +1191,7 @@ def _build_search_results_xlsx_bytes(
         # Phase 103 D-04/D-14: LOCAL rows live on the Local Documents sheet, not here.
         if _has_local and _is_local_row(res):
             continue
+        row_step()
         display_dict = res.get('display') or {}
         sys_id = display_dict.get('id') or res.get('sys_id') or ''
         meta = meta_resolver(sys_id) if sys_id else None
@@ -1317,6 +1320,7 @@ def _build_search_results_xlsx_bytes(
         for r in results:
             if not _is_local_row(r):   # D-14: display.source primary, 97-prefix secondary
                 continue
+            row_step()
             sid = _row_sys_id(r)
             filename = (r.get('display') or {}).get('shelfmark') or sid
             fp = _local_filepath_map.get(sid) or ''
@@ -1553,6 +1557,193 @@ def _format_txt_genizah_block(result_dict, full_text=None):
     # KeyError. The header format is unchanged from pre-v7.17 (LEXP-08).
     d = result_dict.get('display') or {}
     return f"=== {d.get('shelfmark', '')} | {d.get('title', '')} ===\n{snippet}"
+
+
+def _build_search_export(job, progress=None, cancelled=None):
+    """The bytes of a Search tab export (desktop/search_export.py::ExportJob: xlsx, csv,
+    docx or txt). It reads only the job, a snapshot of the window, because a large export
+    runs on a worker (GS-9 part 2, owner ruling D5); *progress(done, total)* and
+    *cancelled()* are the worker's, and Cancel raises ExportCancelled."""
+    step = job.tracker(progress, cancelled)
+    results, fmt = job.results, job.fmt
+
+    def _export_filepath(sid):
+        return job.local_filepaths.get(sid, '') or ''
+
+    # Phase 103: shared LOCAL pre-check reused by the CSV/TXT/DOCX branches.
+    _has_local_in_export = any((r.get('display') or {}).get('source') == 'LOCAL' for r in results)
+    # EXPUX-04: fuller matched-passage text for DOCX/TXT: the page's text, as in the xlsx
+    # Full Text (_page_text_for_export); LOCAL dicts carry 'full_text', Genizah reads the index.
+    def _full_text_for_export(r):
+        return _page_text_for_export(r, job.page_text) or ''
+
+    search_info_lines = [
+        tr("Search Query") + f": {job.search_query}",
+        tr("Search Mode") + f": {job.search_mode}",
+        tr("Gap") + f": {job.search_gap}",
+        tr("Lab Mode") + f": {'On' if job.lab_mode_on else 'Off'}",
+    ]
+    if job.lab_mode_on:
+        search_info_lines.append(tr("Deep Scan") + f": {'On' if job.deep_scan_on else 'Off'}")
+    # The transcriptions the shown results read (editions plan D1), when the choice applied.
+    if job.transcriptions_label:
+        search_info_lines.append(tr("Transcriptions") + f": {job.transcriptions_label}")
+    search_info_text = "\n".join(search_info_lines)
+    credit_text = job.credit_text
+
+    if fmt == 'xlsx':
+        from shared.export_dossier import main_header_row
+        # D-04 REVISED (2026-05-20): the library name in the UI's language; the
+        # shelfmark and title as the window read them when the export started.
+        def _meta_resolver(sid):
+            step.check()                 # the Manuscripts and Bibliography sheets heed Cancel too
+            if not sid:
+                return None
+            shelf, mtitle, lib_code = job.meta.get(sid, ('', '', ''))
+            try:
+                lib_name = get_library_display(lib_code, short=False, lang=job.lang) if lib_code else ''
+            except Exception:
+                lib_name = lib_code
+            return {'shelfmark': shelf or f'ID: {sid}', 'title': mtitle or '',
+                    'library_code': lib_code, 'library_name': lib_name}
+
+        return _build_search_results_xlsx_bytes(
+            results=results,
+            headers_main=main_header_row(job.lang),     # D-04 REVISED: headers follow the UI
+            meta_resolver=_meta_resolver,
+            sanitize_fn=shared_sanitize_excel,
+            transcription_sys_ids=job.transcription_ids,
+            printed_ids=job.printed_ids,
+            result_domains=job.result_domains,
+            lang=job.lang,
+            row_step=step,
+            # MUST-FIX 94-04-D: the index's text for rows that lack full_text.
+            full_text_fetcher=lambda uid: (job.page_text(uid) or '') if (uid and job.page_text) else '',
+            search_query=job.search_query,
+            search_mode=job.search_mode,
+            search_gap=(job.search_gap or None),
+            lab_mode_on=job.lab_mode_on,
+            deep_scan_on=job.deep_scan_on if job.lab_mode_on else None,
+            domain_name_map=_hebrew_domain_names(job),
+            # Phase 103: the pre-primed LOCAL file paths (no per-row SQLite lookup).
+            local_filepath_map=job.local_filepaths,
+            # EXPUX-03: omit the MiDRASH credit on the Credits sheet when LOCAL-only.
+            local_only=_has_local_in_export and all(
+                (r.get('display') or {}).get('source') == 'LOCAL' for r in results),
+            # A selection is counted as selected; a whole list the search cut off or Stop
+            # ended says "N+", as the website's does.
+            result_count_capped=job.count_capped,
+        )
+
+    if fmt == 'csv':
+        from shared_export_utils import sanitize_text_for_excel
+        headers = [tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("Image/Page"),
+                   tr("Source"), tr("Snippet")]
+        # Phase 103 D-08 / D-13: Filepath + Page columns ONLY when LOCAL rows are exported.
+        if _has_local_in_export:
+            headers = headers + ["נתיב מלא" if job.lang == 'he' else "Filepath",
+                                 "עמוד" if job.lang == 'he' else "Page"]
+        f = io.StringIO()
+        f.write(credit_text)
+        f.write("\n" + search_info_text + "\n")
+        writer = csv.writer(f)
+        writer.writerow([])
+        writer.writerow(headers)
+        for r in results:
+            step()
+            d = r['display']
+            sid = d.get('id', '')
+            # raw_file_hl keeps the highlight markers; one line, single spaces.
+            snippet = re.sub(r'\s+', ' ', str(r.get('raw_file_hl', '')).strip()
+                             .replace('\n', ' ').replace('\r', ' '))
+            if d.get('source') == 'LOCAL':
+                # Phase 103 D-08 (WR-02): the tested helper (Shelfmark=filename, ...).
+                row, _ = _build_export_data_row(r, _export_filepath)
+            else:
+                shelf, title, library_code = job.meta.get(sid, ('', '', ''))
+                if not shelf or shelf == "Unknown":
+                    shelf = d.get('shelfmark', '')
+                library_name = get_library_display(library_code, short=False) if library_code else ''
+                row = [sid, library_name, shelf, title or d.get('title', ''),
+                       str(d.get('img', '')), _export_source_label(r), snippet]
+            # Phase 103 T-103-07: strip '*' markers, then escape every cell against
+            # formula injection (a cell beginning with = + - @ is a live formula in Excel).
+            row = [sanitize_text_for_excel(str(val).replace('*', '')) for val in row]
+            if _has_local_in_export:
+                row = row + _csv_extra_cols(r, _export_filepath)   # ['', ''] for Genizah rows
+            writer.writerow(row)
+        # csv.writer ends records with CRLF; nothing translates them (PR #397).
+        return f.getvalue().encode('utf-8-sig')
+
+    if fmt == 'docx':
+        from docx import Document
+        from shared.docx_export import set_document_rtl, write_docx_result_block
+        doc = Document()
+        for line in credit_text.split('\n'):
+            if line.strip():
+                p = doc.add_paragraph(line.strip())
+                if p.runs:
+                    p.runs[0].font.bold = True
+        for line in search_info_text.split('\n'):
+            if line.strip():
+                doc.add_paragraph(line.strip())
+        doc.add_paragraph("")
+        # Phase 103 D-10/D-11: per-result blocks (Genizah + LOCAL) via the shared writer.
+        for r in results:
+            step()
+            d = r.get('display') or {}
+            sid = d.get('id') or r.get('sys_id') or ''
+            fp = _export_filepath(sid) if d.get('source') == 'LOCAL' else ''
+            # EXPUX-04: the fuller matched passage (capped + highlighted inside the writer).
+            write_docx_result_block(doc, _export_row_with_sources(r), filepath=fp, lang=job.lang,
+                                    full_text=_full_text_for_export(r))
+        if job.lang == "he":
+            set_document_rtl(doc)   # no right alignment on Normal: Word reads it as flush LEFT
+        out = io.BytesIO()
+        doc.save(out)
+        return out.getvalue()
+
+    # TXT
+    f = io.StringIO()
+    f.write(credit_text)
+    f.write("\n" + search_info_text + "\n\n")
+    for r in results:
+        step()
+        if (r.get('display') or {}).get('source') == 'LOCAL':
+            # Phase 103 D-09 (WR-02): the LOCAL labeled block; EXPUX-04 full text.
+            f.write(_format_txt_local_block(r, _export_filepath, full_text=_full_text_for_export(r)) + "\n\n")
+        else:
+            # EXPUX-04: the fuller matched passage when full_text is available.
+            f.write(_format_txt_genizah_block(r, full_text=_full_text_for_export(r)) + "\n\n")
+    # Written as the text-mode write did: line ends as the system's.
+    return f.getvalue().replace('\n', os.linesep).encode('utf-8')
+
+
+def _hebrew_domain_names(job):
+    """{English domain: Hebrew display name} for a Hebrew xlsx export, from one FJMS query
+    over the exported manuscripts (smoke verification round 2, 2026-05-21); {} in English
+    or on any failure (the names then pass through in English)."""
+    names = {}
+    if job.lang != 'he' or not job.result_domains:
+        return names
+    try:
+        from shared.fjms_service import get_fjms_service, qualify_domain_name
+        svc = get_fjms_service(thread_safe=True)
+        if not (svc and svc.is_available()):
+            return names
+        sids = list({(r.get('display') or {}).get('id') or r.get('sys_id') or '' for r in job.results} - {''})
+        for _sys_id, doms in (svc.get_domains_for_sys_ids(sids) or {}).items():
+            for d in doms:
+                qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
+                if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
+                    names[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
+                if d.get('domain_heb') and d['domain'] not in names:
+                    names[d['domain']] = d['domain_heb']
+                if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in names:
+                    names[d['parent_domain']] = d['parent_domain_heb']
+    except Exception:
+        return {}
+    return names
 
 
 def _show_ok_notice(parent, kind, title, text):
@@ -7129,6 +7320,7 @@ class GenizahGUI(QMainWindow):
 
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
+        self._renumber_timer = rv.renumber_on_moves(self.results_table)   # sorted rows keep 1, 2, 3
         self.results_table.doubleClicked.connect(self._on_results_double_clicked)
         self.results_table.itemChanged.connect(self.on_search_result_item_changed)
         self.results_table.verticalScrollBar().valueChanged.connect(self.check_scroll_load)
@@ -19392,7 +19584,7 @@ class GenizahGUI(QMainWindow):
                               local_only=local_only, app_name=DESKTOP_APP_NAME)
         return "\n".join(lines) + "\n" + "=" * 80 + "\n\n"
 
-    def _show_export_saved_dialog(self, path):
+    def _show_export_saved_dialog(self, path, count=None):
         """EXPUX-01: 'export complete' dialog with Open File / Open Folder.
 
         Replaces the bare ``QMessageBox.information("Saved to {path}")`` toast at
@@ -19405,7 +19597,8 @@ class GenizahGUI(QMainWindow):
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle(tr("Saved"))
-        box.setText(tr("Saved to {}").format(path))
+        box.setText(tr("Saved to {}").format(path) + (
+            "\n" + tr("{} results written.").format(f"{count:,}") if count is not None else ""))
         open_btn = box.addButton(tr("Open File"), QMessageBox.ButtonRole.AcceptRole)
         folder_btn = box.addButton(tr("Open Folder"), QMessageBox.ButtonRole.ActionRole)
         close_btn = box.addButton(tr("Close"), QMessageBox.ButtonRole.RejectRole)
@@ -25785,6 +25978,7 @@ class GenizahGUI(QMainWindow):
         if not keep_sorting_off:
             self.results_table.setSortingEnabled(True)
         self._update_load_more_button()   # the new rows are all kept ones: nothing to hide
+        self._number_shown_rows()
 
         # Update Status: the rows actually visible, with the excluded note
         # (exclusions outlive the search that made them) and the expanded
@@ -27317,7 +27511,11 @@ class GenizahGUI(QMainWindow):
         if (changed or view.excluded != previous_excluded) and table.rowCount():
             self.status_label.setText(self._search_status_summary())
         self._update_load_more_button()
+        self._number_shown_rows()
         return view.excluded
+
+    def _number_shown_rows(self):
+        rv.number_shown_rows(self.results_table)
 
     def _result_page_num(self, res):
         """The 1-based page a results row is showing, or None.
@@ -28546,6 +28744,16 @@ class GenizahGUI(QMainWindow):
                     ticked.append(res)
         if any_ticked:                       # a selection, even of rows still loading only
             return ticked, True
+        header = self.results_table.horizontalHeader()
+        key = {self.COL_SHELF: lambda r: natural_sort_key(self._result_text(r, rv.SHELF) or ''),
+               self.COL_SYS_ID: self._result_sid,
+               self.COL_LIBRARY: lambda r: self._result_text(r, rv.LIBRARY) or '',
+               self.COL_TITLE: lambda r: self._result_text(r, rv.TITLE) or '',
+               self.COL_DOMAIN: lambda r: self._result_text(r, rv.DOMAIN) or ''}.get(header.sortIndicatorSection())
+        if key is not None and header.isSortIndicatorShown():
+            # Sorted by a column: the whole list in the table's sort (owner ruling D4).
+            kept = [r for i, r in enumerate(view.results) if view.shown[i] and not view.is_pending(i)]
+            return export_order(kept, key, header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder), False
         return shown + view.shown_after(getattr(self, 'results_loaded', 0)), False
 
     def _collect_sorted_results(self):
@@ -29847,426 +30055,116 @@ class GenizahGUI(QMainWindow):
         tbl_w.set(qn("w:w"), str(int(pct * 50)))
 
     def export_results(self, fmt='xlsx'):
-        """
-        Export results handling specific formats directly.
-        fmt: 'xlsx', 'csv', 'txt', or 'docx'
-        """
+        """Export the Search results as xlsx, csv, txt or docx: every result the filters keep,
+        or the ticked ones (GS-9). Built from a snapshot of the window (_search_export_job), on
+        a worker above EXPORT_IN_BACKGROUND rows (desktop/search_export.py); saved here."""
         startup_tips.mark_used('export')  # its startup tip is no longer needed
         base_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
-
         filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)", 'docx': "Word (*.docx)"}
-        selected_filter = filters.get(fmt, "All Files (*.*)")
-
         # D-03: emit export dialog open BEFORE the save dialog (no no-data guard here — MEDIUM-8)
         self._emit_feature_opened(dialog_name='export')
-        if not self._results_to_export()[0]:
+        results, selected = self._results_to_export()
+        if not results:
             _show_ok_notice(self, 'information', tr("Export Results"), tr(
                 "Nothing to export: every result in the table is hidden by a filter or an exclusion."))
             return
-        path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, selected_filter)
+        if self._export_running():
+            _show_ok_notice(self, 'information', tr("Export Results"), tr("An export is already in progress"))
+            return
+        path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path,
+                                              filters.get(fmt, "All Files (*.*)"))
         if not path: return
         # D-03: emit export action AFTER path is chosen (cancelled save → no action emit — MEDIUM-8)
         self._emit_feature_opened(action=self._EXPORT_ACTION_BY_FMT.get(fmt))
+        # Phase 103: prime the LOCAL file paths in ONE SQLite query (BUG-6), never per row.
+        self._prime_local_filepath_cache(results)
+        # MUST-FIX 94-04-E: the domains are filled in by a worker after the results land; an
+        # xlsx exported before then has empty Domains cells. EXPUX-02: LOCAL rows have none.
+        if (fmt == 'xlsx' and not self._result_domain_map and any(
+                (r.get('display') or {}).get('id') and (r.get('display') or {}).get('source') != 'LOCAL'
+                for r in results)):
+            reply = QMessageBox.warning(
+                self, tr("Domain enrichment pending"),
+                tr("Domain enrichment is still running. Exporting now will produce empty Domains cells. Continue?"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.No:
+                return
+        job = self._search_export_job(fmt, results, selected)
+        if len(results) > EXPORT_IN_BACKGROUND:
+            self._start_background_export(job, path)
+            return
+        try:
+            payload = _build_search_export(job)
+        except Exception as e:
+            QMessageBox.critical(self, tr("Error"), f"Failed to save {fmt.upper()}:\n{str(e)}")
+            return
+        self._finish_search_export(fmt, path, payload, len(results))
 
-        # Prepare tabular data
-        headers = [tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
-        data_rows = []
-
-        results_to_export, has_selection = self._results_to_export()
-
-        # Phase 103: prime the batch filepath cache for any LOCAL hits in the
-        # export set (BUG-6 pattern — ONE SQLite query, never per-row).
-        self._prime_local_filepath_cache(results_to_export)
-
-        # Phase 103: authoritative filepath snapshot — primed above for every
-        # LOCAL sys_id; reading from the snapshot prevents the per-row SQLite
-        # fallback in _lookup_local_filepath from firing during export.
-        _local_fp_export_map = dict(getattr(self, '_local_filepath_cache', {}) or {})
-
-        def _export_filepath(sid):
-            return _local_fp_export_map.get(sid, '') or ''
-
-        # Phase 103: shared LOCAL pre-check reused by CSV/TXT/DOCX branches.
-        _has_local_in_export = any(
-            (r.get('display') or {}).get('source') == 'LOCAL'
-            for r in results_to_export
-        )
-        # EXPUX-03: a LOCAL-only export (every row LOCAL) omits the MiDRASH
-        # data-source credit. all([]) is True, so gate on _has_local_in_export.
-        _local_only_export = _has_local_in_export and all(
-            (r.get('display') or {}).get('source') == 'LOCAL'
-            for r in results_to_export
-        )
-
-        # EXPUX-04: fuller matched-passage text for DOCX/TXT: the page's text,
-        # as in the xlsx Full Text (_page_text_for_export) — LOCAL dicts carry
-        # 'full_text'; Genizah hydrates from the Tantivy index via 'uid'.
-        _searcher = getattr(self, 'searcher', None)
-        _page_fetcher = _searcher.get_full_text_by_id if _searcher is not None else None
-
-        def _full_text_for_export(r):
-            return _page_text_for_export(r, _page_fetcher) or ''
-
-        for r in results_to_export:
-            d = r['display']
-            sid = d.get('id', '')
-            _is_local_hit = d.get('source') == 'LOCAL'
-
-            # Use raw_file_hl so highlight markers remain intact
-            # Clean snippet: remove newlines (input is now clean text with asterisks)
-            raw_hl = r.get('raw_file_hl', '')
-            snippet = str(raw_hl).strip().replace('\n', ' ').replace('\r', ' ')
-            snippet = re.sub(r'\s+', ' ', snippet)
-
-            if _is_local_hit:
-                # Phase 103 D-08 (WR-02): build the LOCAL row via the tested
-                # module-level helper (Shelfmark=filename, Library=parent folder,
-                # Source='LOCAL', Snippet=matched text, Image/Page=D-02 label).
-                # Routing production through the helper keeps its unit tests honest.
-                row, _ = _build_export_data_row(r, _export_filepath)
-                data_rows.append(row)
-            else:
-                # Fetch fresh metadata (Important for Lab Mode)
+    def _search_export_job(self, fmt, results, selected):
+        """Everything the export reads from the window, read now (Codex F2 on the GS-9 plan):
+        a new search or New while a large export builds cannot mix into its file."""
+        meta = {}
+        for r in results:
+            sid = (r.get('display') or {}).get('id', '')
+            if sid and sid not in meta:
                 shelf, title = self.meta_mgr.get_meta_for_id(sid)
-                if not shelf or shelf == "Unknown":
-                    shelf = d.get('shelfmark', '')
-                if not title:
-                    title = d.get('title', '')
+                meta[sid] = (shelf, title, self.meta_mgr.get_library_for_id(sid) or '')
+        local = sum(1 for r in results if (r.get('display') or {}).get('source') == 'LOCAL')
+        sources = (getattr(self, '_last_search_params', None) or {}).get('sources')
+        names, searcher = dict(self._SOURCE_CHOICES), getattr(self, 'searcher', None)
+        lab = self.btn_lab_mode_toggle.isChecked()
+        return ExportJob(
+            fmt=fmt, results=list(results), selected=selected, meta=meta, lang=CURRENT_LANG,
+            credit_text=self._get_credit_header(local_only=bool(local) and local == len(results)),
+            search_query=re.sub(r'^(\\?\\?\\?|\\?\\?|\\?|=|~|/|\\$|#)\\s*', '', self.last_search_query or ""),
+            search_mode=self.mode_combo.currentText(), search_gap=self.gap_input.text(),
+            lab_mode_on=lab, deep_scan_on=lab and self.chk_lab_deep.isChecked(),
+            transcriptions_label=tr(names[sources]) if sources in names else '',
+            local_filepaths=dict(getattr(self, '_local_filepath_cache', {}) or {}),
+            transcription_ids=set(getattr(self, '_pgp_transcription_sys_ids', None) or ()),
+            printed_ids=set(self._printed_sys_ids or ()), result_domains=dict(self._result_domain_map),
+            count_capped=not selected and self._run_left_matches_out(),
+            page_text=searcher.get_full_text_by_id if searcher is not None else None)
 
-                # Get library info (full name for export)
-                library_code = self.meta_mgr.get_library_for_id(sid) if sid else ''
-                library_name = get_library_display(library_code, short=False) if library_code else ''
+    def _export_running(self):
+        thread = getattr(self, '_export_thread', None)
+        try:
+            return thread is not None and thread.isRunning()
+        except RuntimeError:
+            return False
 
-                data_rows.append([
-                    sid, library_name, shelf, title,
-                    str(d.get('img', '')), _export_source_label(r), snippet,
-                ])
+    def _start_background_export(self, job, path):
+        """A large export: built on a worker with a progress dialog and Cancel, the window
+        usable meanwhile (owner ruling D5); the save and its questions come back here."""
+        n = len(job.results)
+        dlg = QProgressDialog(tr("Exporting {} results...").format(f"{n:,}"), tr("Cancel"), 0, n, self)
+        dlg.setWindowTitle(tr("Export Results"))
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setMinimumDuration(0)
+        thread = self._export_thread = ExportThread(_build_search_export, job)
+        thread.progress_signal.connect(lambda done, total: dlg.setValue(done))
+        dlg.canceled.connect(thread.request_cancel)
+        thread.done_signal.connect(lambda payload: (dlg.close(), self._finish_search_export(job.fmt, path, payload, n)))
+        thread.error_signal.connect(lambda err: (dlg.close(), QMessageBox.critical(
+            self, tr("Error"), f"Failed to save {job.fmt.upper()}:\n{err}")))
+        thread.cancelled_signal.connect(lambda: (dlg.close(), self.status_label.setText(tr("Export cancelled"))))
+        _keep_until_finished(thread)
+        thread.start()
+        dlg.show()
 
-        credit_text = self._get_credit_header(local_only=_local_only_export)
-        def _strip_search_prefix(text):
-            return re.sub(r'^(\\?\\?\\?|\\?\\?|\\?|=|~|/|\\$|#)\\s*', '', text or "")
-        export_query = _strip_search_prefix(self.last_search_query)
-        search_info_lines = [
-            tr("Search Query") + f": {export_query}",
-            tr("Search Mode") + f": {self.mode_combo.currentText()}",
-            tr("Gap") + f": {self.gap_input.text()}",
-            tr("Lab Mode") + f": {'On' if self.btn_lab_mode_toggle.isChecked() else 'Off'}",
-        ]
-        if self.btn_lab_mode_toggle.isChecked():
-            search_info_lines.append(tr("Deep Scan") + f": {'On' if self.chk_lab_deep.isChecked() else 'Off'}")
-        # The transcriptions the shown results read (editions plan D1), when the choice applied.
-        _sources_run = (getattr(self, '_last_search_params', None) or {}).get('sources')
-        _sources_names = dict(self._SOURCE_CHOICES)
-        if _sources_run in _sources_names:
-            search_info_lines.append(tr("Transcriptions") + f": {tr(_sources_names[_sources_run])}")
-        search_info_text = "\n".join(search_info_lines)
-
-        # --- XLSX with 3-sheet citation-grade workbook (Phase 94 EXPORT-META-09) ---
-        if fmt == 'xlsx':
-            try:
-                from genizah_core import get_library_display as core_get_library_display
-                from shared.export_dossier import main_header_row
-
-                # D-04 REVISED (2026-05-20): build a lang-aware meta_resolver.
-                # When CURRENT_LANG == 'he' the row shows the Hebrew library
-                # name (via LIBRARY_CODES_HE in get_library_display); else
-                # English. Codex SHOULD-FIX 8 pattern (primitive 4-key dict).
-                meta_mgr = self.meta_mgr
-                _row_lang = CURRENT_LANG
-                def _meta_resolver(sid):
-                    if not sid or meta_mgr is None:
-                        return None
-                    try:
-                        shelf, mtitle = meta_mgr.get_meta_for_id(sid)
-                        shelf = shelf or f'ID: {sid}'
-                        mtitle = mtitle or ''
-                    except Exception:
-                        shelf, mtitle = f'ID: {sid}', ''
-                    try:
-                        lib_code = meta_mgr.get_library_for_id(sid) or ''
-                    except Exception:
-                        lib_code = ''
-                    try:
-                        lib_name = core_get_library_display(lib_code, short=False, lang=_row_lang) if lib_code else ''
-                    except Exception:
-                        lib_name = lib_code
-                    return {
-                        'shelfmark': shelf, 'title': mtitle,
-                        'library_code': lib_code, 'library_name': lib_name,
-                    }
-
-                # D-04 REVISED (2026-05-20): main-sheet headers follow CURRENT_LANG.
-                # When Hebrew UI is active the headers render in Hebrew (e.g.
-                # 'מספר מערכת' / 'ספרייה'); English UI keeps the English row.
-                # MUST-FIX 94-04-B (English-locked headers) is SUPERSEDED by
-                # this bilingual revision per smoke verification 2026-05-20.
-                headers_main = main_header_row(_row_lang)
-
-                # MUST-FIX 94-04-E: pre-export domain readiness check.
-                # _result_domain_map is reset to {} BEFORE the async
-                # DomainEnrichmentWorker starts (genizah_app.py:16414, 16422
-                # reset; :16727-16729 worker start). Export buttons enable
-                # earlier (:16414). Click-export-immediately would yield empty
-                # Domains cells. Warn the user with a non-blocking dialog so
-                # they can cancel and wait, or proceed with the documented gap.
-                # EXPUX-02: domains are a Genizah-only concept. Count only
-                # NON-LOCAL sys_ids so a LOCAL-only xlsx export never trips
-                # this "Domain enrichment pending" warning (LOCAL synthetic
-                # 97-prefix ids carry source=='LOCAL' and never enrich domains).
-                _has_genizah_sys_ids = any(
-                    ((r.get('display') or {}).get('id') or r.get('sys_id'))
-                    and (r.get('display') or {}).get('source') != 'LOCAL'
-                    for r in results_to_export
-                )
-                if (not self._result_domain_map) and _has_genizah_sys_ids:
-                    reply = QMessageBox.warning(
-                        self,
-                        tr("Domain enrichment pending"),
-                        tr("Domain enrichment is still running. Exporting now will produce empty Domains cells. Continue?"),
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.No,
-                    )
-                    if reply == QMessageBox.StandardButton.No:
-                        return  # user cancels; export aborts cleanly
-
-                # Smoke verification round 2 (2026-05-21): Hebrew domain
-                # substitution. Build the EN->HE display-name map at export
-                # time via a single FJMS query on the unique sys_ids of the
-                # results being exported. Chosen over a search-time-cached
-                # map because:
-                #   (a) export is rare relative to search — paying the lookup
-                #       cost only when the user actually exports avoids
-                #       per-search overhead.
-                #   (b) desktop search-state doesn't already carry the
-                #       Hebrew domain names, so search-time caching would
-                #       require a new piece of state alongside
-                #       _result_domain_map.
-                # Skipped entirely on lang='en' to avoid the FJMS hit.
-                _domain_name_map_for_xlsx: dict = {}
-                if CURRENT_LANG == 'he' and self._result_domain_map:
-                    try:
-                        from shared.fjms_service import (
-                            get_fjms_service,
-                            qualify_domain_name,
-                        )
-                        _fjms_svc = get_fjms_service(thread_safe=True)
-                        if _fjms_svc and _fjms_svc.is_available():
-                            _unique_sids = [
-                                (r.get('display') or {}).get('id') or r.get('sys_id') or ''
-                                for r in results_to_export
-                            ]
-                            _unique_sids = list({s for s in _unique_sids if s})
-                            _raw = _fjms_svc.get_domains_for_sys_ids(_unique_sids) or {}
-                            for _sys_id, _doms in _raw.items():
-                                _child_names = {d['domain'] for d in _doms}
-                                for d in _doms:
-                                    qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
-                                    if (
-                                        qname != d['domain']
-                                        and d.get('domain_heb')
-                                        and d.get('parent_domain_heb')
-                                    ):
-                                        _domain_name_map_for_xlsx[qname] = (
-                                            f"{d['domain_heb']} ({d['parent_domain_heb']})"
-                                        )
-                                    if (
-                                        d.get('domain_heb')
-                                        and d['domain'] not in _domain_name_map_for_xlsx
-                                    ):
-                                        _domain_name_map_for_xlsx[d['domain']] = d['domain_heb']
-                                    if (
-                                        d.get('parent_domain_heb')
-                                        and d.get('parent_domain')
-                                        and d['parent_domain'] not in _domain_name_map_for_xlsx
-                                    ):
-                                        _domain_name_map_for_xlsx[d['parent_domain']] = d['parent_domain_heb']
-                                # Strip parent rows that are also child rows
-                                # to match the web _process_domain_data exclude
-                                # rule (avoids double-listing).
-                                _ = _child_names
-                    except Exception:
-                        # Defensive: a failed Hebrew-name lookup falls back
-                        # to English display via the unchanged-pass-through
-                        # contract in shared.export_dossier.
-                        _domain_name_map_for_xlsx = {}
-
-                content = _build_search_results_xlsx_bytes(
-                    results=results_to_export,
-                    headers_main=headers_main,
-                    meta_resolver=_meta_resolver,
-                    sanitize_fn=self._sanitize_for_excel,
-                    # Smoke verification round 2 (2026-05-21): credit_text +
-                    # search_info_text are no longer rendered on the main
-                    # sheet. Their content lives on the "Credits and Info"
-                    # sheet now (built from the per-field kwargs below).
-                    # We still pass empty strings for back-compat / clarity.
-                    credit_text='',
-                    search_info_text='',
-                    transcription_sys_ids=self._pgp_transcription_sys_ids,
-                    printed_ids=self._printed_sys_ids,
-                    result_domains=self._result_domain_map,
-                    lang=CURRENT_LANG,
-                    # MUST-FIX 94-04-D: Tantivy-backed hydration callback for
-                    # rows that lack full_text (e.g., PGP tag rows appended at
-                    # :17065-17076). Mirrors the existing fallback pattern at
-                    # :17813-17815. When the searcher is unavailable, the
-                    # callback returns ''.
-                    full_text_fetcher=lambda uid: (
-                        (self.searcher.get_full_text_by_id(uid) or '')
-                        if (uid and getattr(self, 'searcher', None) is not None)
-                        else ''
-                    ),
-                    # Smoke verification round 2 (2026-05-21):
-                    # per-export search metadata for the new Credits and Info
-                    # sheet. Each field is independently optional; the builder
-                    # skips rows with empty values.
-                    search_query=export_query,
-                    search_mode=self.mode_combo.currentText(),
-                    search_gap=(self.gap_input.text() or None),
-                    lab_mode_on=self.btn_lab_mode_toggle.isChecked(),
-                    deep_scan_on=(
-                        self.chk_lab_deep.isChecked()
-                        if self.btn_lab_mode_toggle.isChecked()
-                        else None
-                    ),
-                    domain_name_map=_domain_name_map_for_xlsx,
-                    # Phase 103: pass the pre-primed cache dict (BUG-6 pattern —
-                    # _prime_local_filepath_cache already populated this for every
-                    # LOCAL sys_id; no per-row SQLite lookup during xlsx export).
-                    local_filepath_map=dict(getattr(self, '_local_filepath_cache', {}) or {}),
-                    # EXPUX-03: omit MiDRASH credit on Credits sheet when LOCAL-only.
-                    local_only=_local_only_export,
-                    # A selection is counted as selected; a whole list the search
-                    # cut off or Stop ended says "N+", as the website's does.
-                    result_count_capped=(not has_selection and self._run_left_matches_out()),
-                )
-                from desktop.export_save import save_export, write_bytes
-                path = save_export(self, path, lambda p: write_bytes(p, content))
-                if path:
-                    self._save_last_folder(path)
-                    self._show_export_saved_dialog(path)
-
-            except Exception as e:
-                QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{str(e)}")
-
-        # --- CSV ---
-        elif fmt == 'csv':
-            try:
-                from shared_export_utils import sanitize_text_for_excel
-                # Phase 103 D-08 / D-13: append Filepath + Page columns ONLY
-                # when LOCAL rows are present in the export set.
-                if _has_local_in_export:
-                    _fp_label = "נתיב מלא" if CURRENT_LANG == 'he' else "Filepath"
-                    _pg_label = "עמוד" if CURRENT_LANG == 'he' else "Page"
-                    csv_headers = headers + [_fp_label, _pg_label]
-                else:
-                    csv_headers = headers
-                from contextlib import nullcontext
-                from desktop.export_save import save_export, write_text
-                # Built in memory, then written by save_export: a file open in
-                # Excel is retried or renamed, never a half-written export.
-                with nullcontext(io.StringIO()) as f:
-                    f.write(credit_text)
-                    f.write("\n" + search_info_text + "\n")
-                    writer = csv.writer(f)
-                    writer.writerow([])
-                    writer.writerow(csv_headers)
-                    for r, row in zip(results_to_export, data_rows):
-                        # Phase 103 T-103-07: strip '*' markers, then
-                        # formula-injection-escape EVERY cell (a LOCAL
-                        # filename/folder/filepath/matched-text beginning with
-                        # = + - @ would otherwise be a live formula when the
-                        # .csv is opened in Excel/Sheets).
-                        clean_row = [
-                            sanitize_text_for_excel(str(val).replace('*', ''))
-                            for val in row
-                        ]
-                        if _has_local_in_export:
-                            # Phase 103 D-08 / T-103-07 (WR-02): route through the
-                            # tested helper — returns ['', ''] for Genizah rows and
-                            # the sanitized [filepath, page] pair for LOCAL rows
-                            # (page label per D-02, no double-prefix).
-                            clean_row = clean_row + _csv_extra_cols(r, _export_filepath)
-                        writer.writerow(clean_row)
-                path = save_export(self, path, lambda p: write_text(
-                    p, f.getvalue(), 'utf-8-sig', newline=''))
-                if path:
-                    self._save_last_folder(path)
-                    self._show_export_saved_dialog(path)
-            except Exception as e:
-                QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{str(e)}")
-
-        # --- DOCX ---
-        elif fmt == 'docx':
-            try:
-                from docx import Document
-                from shared.docx_export import set_document_rtl, write_docx_result_block
-                doc = Document()
-                # Credits + search-metadata header (unchanged).
-                for line in credit_text.split('\n'):
-                    if not line.strip():
-                        continue
-                    p = doc.add_paragraph(line.strip())
-                    if p.runs:
-                        p.runs[0].font.bold = True
-                for line in search_info_text.split('\n'):
-                    if not line.strip():
-                        continue
-                    doc.add_paragraph(line.strip())
-                doc.add_paragraph("")
-
-                # Phase 103 D-10/D-11: per-result rich-document blocks
-                # (both Genizah + LOCAL) via the shared Wave-1 writer.
-                for r in results_to_export:
-                    d = r.get('display') or {}
-                    sid = d.get('id') or r.get('sys_id') or ''
-                    fp = _export_filepath(sid) if d.get('source') == 'LOCAL' else ''
-                    # EXPUX-04: pass fuller matched-passage text (capped + highlighted inside the writer).
-                    write_docx_result_block(doc, _export_row_with_sources(r), filepath=fp, lang=CURRENT_LANG,
-                                            full_text=_full_text_for_export(r))
-
-                if CURRENT_LANG == "he":
-                    # No right alignment on the Normal style: Word reads it
-                    # on a right-to-left paragraph as flush LEFT.
-                    set_document_rtl(doc)
-
-                from desktop.export_save import save_export
-                path = save_export(self, path, doc.save)
-                if path:
-                    self._save_last_folder(path)
-                    self._show_export_saved_dialog(path)
-            except Exception as e:
-                QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{str(e)}")
-
-        # --- TXT ---
-        else:
-            try:
-                from contextlib import nullcontext
-                from desktop.export_save import save_export, write_text
-                with nullcontext(io.StringIO()) as f:
-                    f.write(credit_text)
-                    f.write("\n" + search_info_text + "\n\n")
-                    for r in results_to_export:
-                        d = r.get('display') or {}
-                        if d.get('source') == 'LOCAL':
-                            # Phase 103 D-09 (WR-02): LOCAL labeled block via the
-                            # tested helper. Page label per D-02 — an already
-                            # human-formatted locator like 'p. 3' renders as
-                            # '(p. 3)', NOT '(page p. 3)'.
-                            # EXPUX-04: full_text expands the matched passage (capped + highlighted).
-                            f.write(_format_txt_local_block(r, _export_filepath, full_text=_full_text_for_export(r)) + "\n\n")
-                        else:
-                            # GENIZAH branch — EXPUX-04 expands to the fuller matched
-                            # passage when full_text is available; falls back to the
-                            # byte-identical pre-v7.17 single-line snippet otherwise.
-                            f.write(_format_txt_genizah_block(r, full_text=_full_text_for_export(r)) + "\n\n")
-                path = save_export(self, path, lambda p: write_text(p, f.getvalue(), 'utf-8'))
-                if path:
-                    self._save_last_folder(path)
-                    self._show_export_saved_dialog(path)
-            except Exception as e:
-                QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{str(e)}")
+    def _finish_search_export(self, fmt, path, payload, count):
+        """Save a built export: a file Word or Excel holds open is asked about (export_save)."""
+        from desktop.export_save import save_export, write_bytes
+        try:
+            path = save_export(self, path, lambda p: write_bytes(p, payload))
+        except Exception as e:
+            QMessageBox.critical(self, tr("Error"), f"Failed to save {fmt.upper()}:\n{str(e)}")
+            return
+        if path:
+            self._save_last_folder(path)
+            self._show_export_saved_dialog(path, count=count)
 
     def export_comp_report(self, fmt='xlsx'):
         # 1. איסוף נתונים (לוגיקה יציבה)
@@ -36546,7 +36444,7 @@ class GenizahGUI(QMainWindow):
         scholarly transcriptions' index (desktop/editions_index.py): a stopped build still
         ending, or a promotion renaming and reopening, which the main index's reopen
         (reload_index reattaches the editions) must not run beside."""
-        busy = []
+        busy = ['export'] if self._export_running() else []    # page texts (GS-9, Codex F1)
         editions = getattr(self, '_editions_index', None)    # made once startup has finished
         if editions is not None and editions.busy():
             busy.append('scholarly transcriptions')

@@ -3418,6 +3418,8 @@ TRANSLATIONS = {
     "Cancelling export...": "מבטל ייצוא...",
     "Exported to": "יוצא אל",
     "Export cancelled": "הייצוא בוטל",
+    "Exporting {} results...": "מייצא {} תוצאות...",
+    "{} results written.": "נכתבו {} תוצאות.",
     "Unpublish": "ביטול פרסום",
     "Remove this join from community view?": "להסיר צירוף זה מתצוגת הקהילה?",
     "Published": "פורסם",

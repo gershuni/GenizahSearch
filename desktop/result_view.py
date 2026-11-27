@@ -275,3 +275,27 @@ class TextCache:
     def forget_column(self, column):
         for key in [k for k in self._texts if k[1] == column]:
             del self._texts[key]
+
+
+def number_shown_rows(table):
+    """Number the shown rows 1, 2, 3... down the table's side: Qt's own numbers counted
+    the rows a filter hides too, so a filtered list of 143 ended at "638" (owner, GS-9)."""
+    try:
+        labels, shown = [], 0
+        for row in range(table.rowCount()):
+            hidden = table.isRowHidden(row)
+            shown += not hidden
+            labels.append('' if hidden else str(shown))
+        table.setVerticalHeaderLabels(labels)
+    except RuntimeError:          # the table went with the window
+        pass
+
+
+def renumber_on_moves(table):
+    """Rows move on a click on a column, or when a sorted column's value changes (Domain
+    arriving, Codex on #151); the side labels move with them. Number the rows again once
+    Qt has, one pass for a burst of moves. Returns the timer, which the table owns."""
+    from PyQt6.QtCore import QTimer
+    timer = QTimer(table, singleShot=True, interval=0, timeout=lambda: number_shown_rows(table))
+    table.model().layoutChanged.connect(lambda *_: timer.start())
+    return timer
