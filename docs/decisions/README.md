@@ -17,6 +17,7 @@ decision with no enforcer is a convention; the pages say which is which.
 | [0008](0008-root-assets-stay.md) | Data assets that `shared/config.py` or the PyInstaller spec resolve at the repository root stay there | [shared/config.py](../../shared/config.py), [GenizahSearchPro.spec](../../GenizahSearchPro.spec) |
 | 0009 | (moved to the private repository) | -- |
 | [0010](0010-no-cdn-cache-for-the-api.md) | The data API is not cached by Cloudflare; only the six library image proxies are | convention |
+| [0011](0011-new-features-in-their-own-module.md) | A new feature goes in its own module with its own state; `GenizahGUI` and the big page factories only wire it in | [tests/test_size_ratchet.py](../../tests/test_size_ratchet.py) |
 
 **Format** of a page: Status, Date, Source, Decision, Why, Consequences, Supersedes, Enforced by
 

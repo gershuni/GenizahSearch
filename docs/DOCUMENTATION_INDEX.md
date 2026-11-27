@@ -58,7 +58,7 @@ docs/
 |------|-----------------|
 | [architecture/OVERVIEW.md](architecture/OVERVIEW.md) | Where code lives, the dependency rules and the tests that enforce them, who owns which state, and a decision for every top-level directory and root file |
 | [architecture/DATA_LIFECYCLE.md](architecture/DATA_LIFECYCLE.md) | One row per data artifact: producer, consumers, class, where its location is decided, rebuild, validation, distribution |
-| [decisions/](decisions/README.md) | The binding decisions -- permanent facade, sidecars instead of a backend process, bounded test runner, flag AND readiness, document classes, scripts namespace, flat tests, root assets, no CDN cache for the API |
+| [decisions/](decisions/README.md) | The binding decisions -- permanent facade, sidecars instead of a backend process, bounded test runner, flag AND readiness, document classes, scripts namespace, flat tests, root assets, no CDN cache for the API, new features in their own module |
 
 ### Which document is authoritative for what
 
