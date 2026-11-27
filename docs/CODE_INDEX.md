@@ -1401,6 +1401,14 @@ Keeps automated browsers (`navigator.webdriver`, crawler user agents) out of Goo
 - **Constant** `AUTOMATED_JS` — sets `window.__ghAutomated` once per page; in both tags' head HTML; PostHog's `_phInit` in `web/main.py` returns early on it
 - **Function** `ga_head_html` — the Google tag (`GA_MEASUREMENT_ID`), loaded only when not automated; is `ANALYTICS_SCRIPT`
 
+## web/browse_head.py
+
+What a `/browse` address may put in the page's head: its `sys_id` and `shelfmark` are the visitor's own text (2026-11-27).
+- **Function** `tag_sys_id` — the `sys_id` when all of it is a corpus system number (`fullmatch`), else None; `browse_page_route` then writes the generic tags
+- **Function** `json_ld_script` — one `<script type="application/ld+json">` block that no value can close: `json.dumps`, then `<`, `>` and `&` as JSON escapes built from character codes
+- **Function** `breadcrumb_data` — Home > Browse > the manuscript, as BreadcrumbList data
+- **Function** `manuscript_data` — the Manuscript data; `holdingArchive` only when the library is known
+
 ## web/ux_timing.py
 
 User-perceived latency, measured in the browser (PostHog `ux_timing`, 2026-10-20). Browser side: `web/static/js/ux_timing.js`; env: `UX_TIMING_ENABLED`, `UX_TIMING_SAMPLE_RATE`. Event v2 (2026-11-22): `img_final` / `img_full_ms` / `img_source`, the image the reader ends up seeing (`sharpState` follows the selector across redraws).

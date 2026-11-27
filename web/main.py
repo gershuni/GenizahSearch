@@ -734,6 +734,7 @@ from web.api import init_api_routes
 from web.search_api import init_search_api
 from web.translations import tr, set_language, get_language, visitor_language
 from web.citation_chip import render_citation_chip
+from web.browse_head import breadcrumb_data, json_ld_script, manuscript_data, tag_sys_id  # what a /browse address may put in the head
 from web.home_query import catalogue_has_shelfmark, home_query_target  # the header's go-to box routes as the homepage box does
 from web.catalog_assets import catalog_available  # and offers % where the catalogue search is served
 from web import hebrew_keyboard  # the on-screen keys in the header's box (and the script for every page's boxes)
@@ -1071,7 +1072,8 @@ def page_meta(
     import html as _html
     _t = _html.escape(title)
     _d = _html.escape(description)
-    url = f'{_SITE_URL}{path}'
+    # Escaped like the title: a path may hold a value from the request's address.
+    url = _html.escape(f'{_SITE_URL}{path}')
     robots = '<meta name="robots" content="noindex, noarchive, follow">\n' if noindex else ''
     return f'''
 <!-- Meta Tags -->
@@ -3006,94 +3008,40 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     )
     if not _embed:
         safe_user_set('current_page', '/browse')
-    # Dynamic metadata for manuscript pages when sys_id is provided
-    if sys_id:
-        # Resolve the real shelfmark from csv_bank when the URL only has sys_id
-        _shelfmark_display = shelfmark
-        if not _shelfmark_display:
-            try:
-                _row = state.meta_mgr.csv_bank.get(sys_id) if state.meta_mgr else None
-                _shelfmark_display = _row.get('shelfmark', sys_id) if _row else sys_id
-            except Exception:
-                _shelfmark_display = sys_id  # Shelfmark lookup failed; use raw identifier
+    # Dynamic metadata for manuscript pages when sys_id is provided. The address's own values
+    # reach the head only through web/browse_head.py: a sys_id that is not a system number
+    # gets the generic tags, and no value can close a JSON-LD block.
+    _tag_sys_id = tag_sys_id(sys_id)
+    if _tag_sys_id:
+        _row = None
+        try:
+            _row = state.meta_mgr.csv_bank.get(_tag_sys_id) if state.meta_mgr else None
+        except Exception:
+            _row = None  # Catalogue lookup failed; the tags name the system number
+        # The address's shelfmark, else the catalogue's, else the system number
+        _shelfmark_display = shelfmark or (_row.get('shelfmark') if _row else '') or _tag_sys_id
         _browse_title = f'{_shelfmark_display} | Dicta Genizah Search'
         ui.page_title(_browse_title)
         ui.add_head_html(page_meta(
-            f'/browse?sys_id={sys_id}',
+            f'/browse?sys_id={_tag_sys_id}',
             title=f'{_shelfmark_display} | Dicta Genizah Search',
             description=f'View Cairo Genizah manuscript {_shelfmark_display} — images, transcription, catalog, bibliography, and scholarly metadata. צפייה בכתב יד {_shelfmark_display} מגניזת קהיר.',
             needs_iiif=True,
         ))
         # Structured data: BreadcrumbList for manuscript pages
-        _safe_shelfmark = _shelfmark_display.replace('"', '&quot;').replace('<', '&lt;')
-        ui.add_head_html(f'''
-        <script type="application/ld+json">
-        {{
-            "@context": "https://schema.org",
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {{
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "Home",
-                    "item": "https://genizahsearch.com/"
-                }},
-                {{
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "Browse",
-                    "item": "https://genizahsearch.com/browse"
-                }},
-                {{
-                    "@type": "ListItem",
-                    "position": 3,
-                    "name": "{_safe_shelfmark}",
-                    "item": "https://genizahsearch.com/browse?sys_id={sys_id}"
-                }}
-            ]
-        }}
-        </script>
-        ''')
+        ui.add_head_html(json_ld_script(breadcrumb_data(_shelfmark_display, _tag_sys_id, _SITE_URL)))
         # Structured data: Manuscript (CreativeWork subtype) — per-page rich data
         # so individual fragments can surface in Knowledge Graph / SERPs.
-        import json as _json
-        _library_code = ''
         _library_name = ''
         try:
-            if _row:
-                _library_code = (_row.get('library_code') or '').strip()
-                if _library_code:
-                    from genizah_core import get_library_display as _glib
-                    _library_name = _glib(_library_code, short=False) or _library_code
+            _library_code = ((_row or {}).get('library_code') or '').strip()
+            if _library_code:
+                from genizah_core import get_library_display as _glib
+                _library_name = _glib(_library_code, short=False) or _library_code
         except Exception:
             _library_name = ''  # Library lookup failed; omit holdingArchive
-        _ms_url = f'https://genizahsearch.com/browse?sys_id={sys_id}'
-        _ms_data = {
-            "@context": "https://schema.org",
-            "@type": "Manuscript",
-            "name": _shelfmark_display,
-            "identifier": sys_id,
-            "url": _ms_url,
-            "isPartOf": {
-                "@type": "Collection",
-                "name": "Cairo Genizah",
-            },
-            "about": "Cairo Genizah manuscript fragment",
-            "inLanguage": ["he", "arc", "jrb"],
-        }
-        if _library_name:
-            _ms_data["holdingArchive"] = {
-                "@type": "ArchiveOrganization",
-                "name": _library_name,
-            }
-        # Escape '<' so a shelfmark containing '</script' can't break out of the
-        # surrounding <script> tag (JSON spec allows literal '<' inside strings).
-        _ms_json = _json.dumps(_ms_data, ensure_ascii=False, indent=2).replace('<', r'<')
-        ui.add_head_html(
-            '<script type="application/ld+json">\n'
-            + _ms_json
-            + '\n</script>'
-        )
+        ui.add_head_html(json_ld_script(
+            manuscript_data(_shelfmark_display, _tag_sys_id, _SITE_URL, _library_name)))
     else:
         ui.add_head_html(page_meta(
             '/browse',
